@@ -66,10 +66,10 @@ export function Sidebar() {
       </div>
 
       <div className="px-5 py-4 border-t border-border flex items-center gap-3">
-        <div className="h-9 w-9 rounded-full gradient-accent flex items-center justify-center text-xs font-bold text-primary-foreground">AS</div>
+        <div className="h-9 w-9 rounded-full gradient-accent flex items-center justify-center text-xs font-bold text-primary-foreground">DA</div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate">Adi Saputra</div>
-          <div className="text-[11px] text-muted-foreground truncate">Field Reporter · Jakarta</div>
+          <div className="text-sm font-medium truncate">demo</div>
+          <div className="text-[11px] text-muted-foreground truncate">Demo Akun</div>
         </div>
       </div>
     </aside>
