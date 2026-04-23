@@ -1,3 +1,5 @@
+/*eslint-disable*/
+
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -163,7 +165,7 @@ function MapPage() {
         to="/submit"
         className="absolute bottom-8 right-8 z-[450] h-14 px-6 rounded-full gradient-primary text-primary-foreground font-semibold shadow-glow hover:scale-105 transition-smooth flex items-center gap-2 animate-float"
       >
-        <Plus size={18} /> Create Report
+        <Plus size={18} /> Buat Pengaduan
       </Link>
     </main>
   );

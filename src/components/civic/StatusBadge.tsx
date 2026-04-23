@@ -1,3 +1,5 @@
+/*eslint-disable*/
+
 import { STATUSES, type Status } from "@/data/reports";
 
 export function StatusBadge({ status }: { status: Status }) {

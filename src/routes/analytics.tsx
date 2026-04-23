@@ -1,3 +1,5 @@
+/*eslint-disable*/
+
 import { createFileRoute } from "@tanstack/react-router";
 import { LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid, PieChart, Pie, Cell, BarChart, Bar, Legend } from "recharts";
 import { CATEGORIES, REPORTS } from "@/data/reports";
@@ -38,18 +40,18 @@ function Analytics() {
   }));
 
   const kpis = [
-    { label: "Total reports", value: "324", delta: "+18% wk", icon: Activity, color: "var(--primary)" },
-    { label: "Avg. response", value: "2.4h", delta: "-12 min", icon: Clock, color: "var(--accent)" },
-    { label: "Resolution rate", value: "87%", delta: "+3 pts", icon: CheckCircle2, color: "var(--status-resolved)" },
-    { label: "Active districts", value: "12", delta: "+2 new", icon: TrendingUp, color: "var(--status-progress)" },
+    { label: "total pengajuan", value: "324", delta: "+18% wk", icon: Activity, color: "var(--primary)" },
+    { label: "rata-rata respons", value: "2.4h", delta: "-12 min", icon: Clock, color: "var(--accent)" },
+    { label: "tingkat penyelesaian", value: "87%", delta: "+3 pts", icon: CheckCircle2, color: "var(--status-resolved)" },
+    { label: "wilayah aktif", value: "12", delta: "+2 new", icon: TrendingUp, color: "var(--status-progress)" },
   ];
 
   return (
     <main className="flex-1 px-5 md:px-10 py-8 max-w-[1500px] w-full mx-auto">
       <header className="mb-8">
-        <div className="text-xs uppercase tracking-[0.25em] text-accent mb-2">Analytics</div>
-        <h1 className="font-display text-3xl md:text-4xl font-bold text-gradient">City performance, at a glance</h1>
-        <p className="text-muted-foreground mt-2 text-sm">Trend lines, distributions, and response benchmarks across all monitored districts.</p>
+        <div className="text-xs uppercase tracking-[0.25em] text-accent mb-2">Data Analitik</div>
+        <h1 className="font-display text-3xl md:text-4xl font-bold text-gradient">performa Kota</h1>
+        <p className="text-muted-foreground mt-2 text-sm">monitoring, distribusi pengaduan di seluruh wilayah Indonesia.</p>
       </header>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -70,12 +72,12 @@ function Analytics() {
         <div className="lg:col-span-2 glass rounded-2xl p-6 shadow-soft">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-display text-lg font-semibold">Reports over time</h3>
-              <p className="text-xs text-muted-foreground">Last 7 days · new vs resolved</p>
+              <h3 className="font-display text-lg font-semibold">Laporan dari waktu ke waktu</h3>
+              <p className="text-xs text-muted-foreground">7 Hari terakhir · Laporan baru vs Selesai</p>
             </div>
             <div className="flex items-center gap-3 text-xs">
-              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-accent" /> New</span>
-              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: "var(--status-resolved)" }} /> Resolved</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-accent" /> Laporan Baru</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: "var(--status-resolved)" }} /> Selesai</span>
             </div>
           </div>
           <div className="h-72">
@@ -93,8 +95,8 @@ function Analytics() {
         </div>
 
         <div className="glass rounded-2xl p-6 shadow-soft">
-          <h3 className="font-display text-lg font-semibold mb-1">By category</h3>
-          <p className="text-xs text-muted-foreground mb-4">Share of all reports</p>
+          <h3 className="font-display text-lg font-semibold mb-1">Pilih Berdasarkan Kategori</h3>
+          <p className="text-xs text-muted-foreground mb-4">Bagikan sepua Pengajuan</p>
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -118,8 +120,8 @@ function Analytics() {
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="glass rounded-2xl p-6 shadow-soft">
-          <h3 className="font-display text-lg font-semibold mb-1">Response time by category</h3>
-          <p className="text-xs text-muted-foreground mb-4">Average hours from submission to first action</p>
+          <h3 className="font-display text-lg font-semibold mb-1">Waktu Respons Berdasarkan Kategori</h3>
+          <p className="text-xs text-muted-foreground mb-4">Rata-rata jam dari pengiriman ke tindakan pertama</p>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={responseByCat} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
@@ -140,8 +142,8 @@ function Analytics() {
         </div>
 
         <div className="glass rounded-2xl p-6 shadow-soft">
-          <h3 className="font-display text-lg font-semibold mb-1">Top performing districts</h3>
-          <p className="text-xs text-muted-foreground mb-5">Ranked by resolution rate this week</p>
+          <h3 className="font-display text-lg font-semibold mb-1">Wilayah Terbaik</h3>
+          <p className="text-xs text-muted-foreground mb-5">Diperanking berdasarkan tingkat penyelesaian minggu ini</p>
           <div className="space-y-4">
             {[
               { name: "Menteng, Jakarta Pusat", rate: 96, count: 24 },

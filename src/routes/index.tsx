@@ -1,3 +1,5 @@
+/*eslint-disable*/
+
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
 import { ArrowUpRight, Activity, Clock, CheckCircle2, AlertCircle, MapPin, Plus, TrendingUp } from "lucide-react";
@@ -7,7 +9,7 @@ import { StatusBadge, CategoryBadge } from "@/components/civic/StatusBadge";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Dashboard — CivicSpot" },
+      { title: "Overview — CivicSpot" },
       { name: "description", content: "Overview of city reports, statuses, and response performance." },
     ],
   }),
@@ -30,9 +32,9 @@ function Dashboard() {
       {/* Hero */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
         <div>
-          <div className="text-xs uppercase tracking-[0.25em] text-accent mb-2">Live overview · Indonesia</div>
+          <div className="text-xs uppercase tracking-[0.25em] text-accent mb-2">tayangan nyata pengaduan · Indonesia</div>
           <h1 className="font-display text-4xl md:text-5xl font-bold text-gradient leading-tight">
-            Your city, listening<br className="hidden md:block" /> in real time.
+            Pengaduan Masyarakat, Indonesia<br className="hidden md:block" /> secara nyata.
           </h1>
           <p className="text-muted-foreground mt-3 max-w-xl text-sm md:text-base">
             Track reports across Jakarta, Bandung, Surabaya and Bali. Coordinate response, measure impact, and keep citizens informed.
@@ -40,10 +42,10 @@ function Dashboard() {
         </div>
         <div className="flex gap-3">
           <Link to="/map" className="px-4 py-2.5 rounded-xl glass-strong text-sm font-medium hover:bg-white/10 transition-smooth flex items-center gap-2">
-            Open Map <ArrowUpRight size={15} />
+            Buka Peta <ArrowUpRight size={15} />
           </Link>
           <Link to="/submit" className="px-4 py-2.5 rounded-xl gradient-primary text-primary-foreground text-sm font-semibold shadow-glow hover:scale-[1.02] transition-smooth flex items-center gap-2">
-            <Plus size={15} /> New Report
+            <Plus size={15} /> Buat Pengaduan
           </Link>
         </div>
       </header>
@@ -76,10 +78,10 @@ function Dashboard() {
         <div className="lg:col-span-2 glass rounded-2xl p-6 shadow-soft">
           <div className="flex items-center justify-between mb-5">
             <div>
-              <h2 className="font-display text-xl font-semibold">Recent Reports</h2>
+              <h2 className="font-display text-xl font-semibold">Pengaduan Sebelumnya</h2>
               <p className="text-xs text-muted-foreground mt-0.5">Live citizen submissions across the network</p>
             </div>
-            <Link to="/my-reports" className="text-xs text-accent hover:underline">View all →</Link>
+            <Link to="/my-reports" className="text-xs text-accent hover:underline">Lihat Semua →</Link>
           </div>
           <div className="space-y-2">
             {recent.map((r) => {
@@ -112,10 +114,10 @@ function Dashboard() {
           <div className="glass rounded-2xl p-6 shadow-soft relative overflow-hidden">
             <div className="absolute -bottom-12 -right-12 h-48 w-48 rounded-full gradient-primary opacity-30 blur-3xl" />
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-accent mb-3 relative">
-              <TrendingUp size={14} /> Performance
+              <TrendingUp size={14} /> performa pengaduan
             </div>
-            <div className="font-display text-3xl font-bold relative">2.4h</div>
-            <div className="text-sm text-muted-foreground relative">average response</div>
+            <div className="font-display text-3xl font-bold relative">24 Jam</div>
+            <div className="text-sm text-muted-foreground relative">rata rata pengaduan</div>
             <div className="mt-5 grid grid-cols-2 gap-3 relative">
               {[
                 { l: "Resolution rate", v: "87%" },
@@ -131,8 +133,8 @@ function Dashboard() {
 
           <div className="glass rounded-2xl p-6 shadow-soft">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold">Category Breakdown</h3>
-              <Link to="/analytics" className="text-xs text-accent hover:underline">Details →</Link>
+              <h3 className="font-semibold">jenis category</h3>
+              <Link to="/analytics" className="text-xs text-accent hover:underline">Detail →</Link>
             </div>
             <div className="space-y-3">
               {(Object.keys(CATEGORIES) as Array<keyof typeof CATEGORIES>).map((k) => {

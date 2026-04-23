@@ -1,3 +1,5 @@
+/*eslint-disable*/
+
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { Search, MoreHorizontal } from "lucide-react";

@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SubmitRouteImport } from './routes/submit'
 import { Route as MyReportsRouteImport } from './routes/my-reports'
 import { Route as MapRouteImport } from './routes/map'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as LandingRouteImport } from './routes/landing'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -30,6 +32,16 @@ const MapRoute = MapRouteImport.update({
   path: '/map',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LandingRoute = LandingRouteImport.update({
+  id: '/landing',
+  path: '/landing',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AnalyticsRoute = AnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -44,6 +56,8 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
+  '/landing': typeof LandingRoute
+  '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/my-reports': typeof MyReportsRoute
   '/submit': typeof SubmitRoute
@@ -51,6 +65,8 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
+  '/landing': typeof LandingRoute
+  '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/my-reports': typeof MyReportsRoute
   '/submit': typeof SubmitRoute
@@ -59,21 +75,47 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
+  '/landing': typeof LandingRoute
+  '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/my-reports': typeof MyReportsRoute
   '/submit': typeof SubmitRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/analytics' | '/map' | '/my-reports' | '/submit'
+  fullPaths:
+    | '/'
+    | '/analytics'
+    | '/landing'
+    | '/login'
+    | '/map'
+    | '/my-reports'
+    | '/submit'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/analytics' | '/map' | '/my-reports' | '/submit'
-  id: '__root__' | '/' | '/analytics' | '/map' | '/my-reports' | '/submit'
+  to:
+    | '/'
+    | '/analytics'
+    | '/landing'
+    | '/login'
+    | '/map'
+    | '/my-reports'
+    | '/submit'
+  id:
+    | '__root__'
+    | '/'
+    | '/analytics'
+    | '/landing'
+    | '/login'
+    | '/map'
+    | '/my-reports'
+    | '/submit'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnalyticsRoute: typeof AnalyticsRoute
+  LandingRoute: typeof LandingRoute
+  LoginRoute: typeof LoginRoute
   MapRoute: typeof MapRoute
   MyReportsRoute: typeof MyReportsRoute
   SubmitRoute: typeof SubmitRoute
@@ -102,6 +144,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MapRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/landing': {
+      id: '/landing'
+      path: '/landing'
+      fullPath: '/landing'
+      preLoaderRoute: typeof LandingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/analytics': {
       id: '/analytics'
       path: '/analytics'
@@ -122,6 +178,8 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnalyticsRoute: AnalyticsRoute,
+  LandingRoute: LandingRoute,
+  LoginRoute: LoginRoute,
   MapRoute: MapRoute,
   MyReportsRoute: MyReportsRoute,
   SubmitRoute: SubmitRoute,

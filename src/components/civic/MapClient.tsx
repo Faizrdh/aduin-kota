@@ -1,3 +1,5 @@
+/*eslint-disable*/
+
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { ComponentProps } from "react";
 
@@ -10,7 +12,7 @@ export function MapClient(props: ComponentProps<typeof CivicMap>) {
     return (
       <div style={{ height: props.height ?? "100%" }} className="rounded-2xl glass-strong flex items-center justify-center">
         <div className="text-muted-foreground text-sm flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-accent animate-pulse" /> Loading map…
+          <span className="h-2 w-2 rounded-full bg-accent animate-pulse" /> Memuat Peta
         </div>
       </div>
     );

@@ -1,13 +1,15 @@
+/*eslint-disable*/
+
 import { Link, useLocation } from "@tanstack/react-router";
 import { LayoutDashboard, Map as MapIcon, PlusCircle, FileText, BarChart3, Radio } from "lucide-react";
 import { motion } from "framer-motion";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/map", label: "Map Reports", icon: MapIcon },
-  { to: "/submit", label: "Submit Report", icon: PlusCircle },
-  { to: "/my-reports", label: "My Reports", icon: FileText },
-  { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/map", label: "Peta Pengajuan", icon: MapIcon },
+  { to: "/submit", label: "Laporan Masuk", icon: PlusCircle },
+  { to: "/my-reports", label: "Laporan Saya", icon: FileText },
+  { to: "/analytics", label: "Data Analitik", icon: BarChart3 },
 ] as const;
 
 export function Sidebar() {
@@ -22,8 +24,8 @@ export function Sidebar() {
           <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-accent animate-pulse-ring" />
         </div>
         <div>
-          <div className="font-display font-bold text-lg leading-none text-gradient">CivicSpot</div>
-          <div className="text-[11px] uppercase tracking-widest text-muted-foreground mt-1">Smart City</div>
+          <div className="font-display font-bold text-lg leading-none text-gradient">AduinKota</div>
+          <div className="text-[11px] uppercase tracking-widest text-muted-foreground mt-1">Aduin Keluhanmu Disini</div>
         </div>
       </div>
 
@@ -56,10 +58,10 @@ export function Sidebar() {
       <div className="p-4 m-3 rounded-2xl glass border border-accent/20">
         <div className="flex items-center gap-2 mb-2">
           <div className="h-2 w-2 rounded-full bg-status-resolved animate-pulse" />
-          <span className="text-xs font-semibold text-foreground">System Online</span>
+          <span className="text-xs font-semibold text-foreground">sistem daring</span>
         </div>
         <p className="text-[11px] text-muted-foreground leading-relaxed">
-          12 city districts actively monitored. Avg. response time 2.4h.
+          aduan masyarakat secara nyata.
         </p>
       </div>
 

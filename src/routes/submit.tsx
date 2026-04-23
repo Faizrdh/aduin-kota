@@ -1,3 +1,5 @@
+/*eslint-disable*/
+
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -68,9 +70,9 @@ function SubmitPage() {
   return (
     <main className="flex-1 px-5 md:px-10 py-8 max-w-5xl w-full mx-auto">
       <header className="mb-8">
-        <div className="text-xs uppercase tracking-[0.25em] text-accent mb-2">Submit a report</div>
-        <h1 className="font-display text-3xl md:text-4xl font-bold text-gradient">Help your city respond faster</h1>
-        <p className="text-muted-foreground mt-2 text-sm">Three quick steps. Your report goes straight to the relevant district team.</p>
+        <div className="text-xs uppercase tracking-[0.25em] text-accent mb-2">Laporan Masuk</div>
+        <h1 className="font-display text-3xl md:text-4xl font-bold text-gradient">Membantu Laporan Pengaduan Anda </h1>
+        <p className="text-muted-foreground mt-2 text-sm">Tiga langkah sederhana. Laporan Anda langsung dikirim ke tim distrik yang relevan.</p>
       </header>
 
       {/* Stepper */}
@@ -104,8 +106,8 @@ function SubmitPage() {
         >
           {step === 0 && (
             <div>
-              <h2 className="font-display text-xl font-semibold mb-1">What kind of issue?</h2>
-              <p className="text-sm text-muted-foreground mb-6">Pick the category that best matches your report.</p>
+              <h2 className="font-display text-xl font-semibold mb-1">Ada permasalahan apa hari ini ?</h2>
+              <p className="text-sm text-muted-foreground mb-6">silahkan pilih kategori yang paling sesuai dengan laporan Anda.</p>
               <div className="grid sm:grid-cols-2 gap-4">
                 {(Object.keys(CATEGORIES) as Category[]).map((c) => {
                   const cat = CATEGORIES[c];
@@ -146,14 +148,14 @@ function SubmitPage() {
           {step === 1 && (
             <div className="grid lg:grid-cols-2 gap-6">
               <div>
-                <h2 className="font-display text-xl font-semibold mb-1">Where is it?</h2>
-                <p className="text-sm text-muted-foreground mb-4">Click the map to pin the exact spot, or use your GPS.</p>
+                <h2 className="font-display text-xl font-semibold mb-1">Dimana lokasi pengaduan ? </h2>
+                <p className="text-sm text-muted-foreground mb-4">klik pin map untuk menandai lokasi, anda saat ini</p>
                 <div className="h-72 lg:h-80 rounded-2xl overflow-hidden border border-border">
                   <MapClient reports={[]} pickMode onPick={(lat, lng) => setPos({ lat, lng })} pickedPos={pos} height="100%" />
                 </div>
                 <div className="flex items-center gap-3 mt-3">
                   <button onClick={useGPS} className="px-3 py-2 rounded-xl glass text-xs font-medium hover:bg-white/10 transition-smooth flex items-center gap-2">
-                    <Crosshair size={14} /> Use my location
+                    <Crosshair size={14} /> Gunakan Lokasi saya saat ini
                   </button>
                   {pos && (
                     <span className="text-xs text-muted-foreground flex items-center gap-1.5">
@@ -164,7 +166,7 @@ function SubmitPage() {
                 </div>
               </div>
               <div className="space-y-4">
-                <h3 className="font-semibold text-sm">Administrative region</h3>
+                <h3 className="font-semibold text-sm">silahkan pilih region administratif</h3>
                 <Select label="Province" value={province} onChange={(v) => { setProvince(v); setCity(""); setDistrict(""); setSubdistrict(""); }} options={provinces} />
                 <Select label="City / Regency" value={city} onChange={(v) => { setCity(v); setDistrict(""); setSubdistrict(""); }} options={cities} disabled={!province} />
                 <Select label="District" value={district} onChange={(v) => { setDistrict(v); setSubdistrict(""); }} options={districts} disabled={!city} />
@@ -176,14 +178,14 @@ function SubmitPage() {
           {step === 2 && (
             <div className="grid lg:grid-cols-2 gap-6">
               <div className="space-y-4">
-                <h2 className="font-display text-xl font-semibold mb-1">Tell us more</h2>
-                <Field label="Report title" hint="A short summary residents will see">
-                  <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Broken streetlight on Jl. Sudirman"
+                <h2 className="font-display text-xl font-semibold mb-1">Detail Pengaduan</h2>
+                <Field label="Judul Laporan" hint="Buat judul singkat yang menggambarkan masalahnya">
+                  <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="contoh: Lampu jalan rusak di Jl. Merdeka"
                     className="w-full bg-white/5 border border-border rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-accent transition-smooth" />
                 </Field>
-                <Field label="Description" hint="What did you observe? Any safety concerns?">
+                <Field label="Deskripsi" hint="apa yang anda temukan, ada permasalahan apa?">
                   <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={5}
-                    placeholder="Provide context — duration, severity, who's affected…"
+                    placeholder="detail pengaduan — apa masalahmu ? sudah berapa lama ? ceritakan disini dengan lengkap"
                     className="w-full bg-white/5 border border-border rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-accent transition-smooth resize-none" />
                 </Field>
               </div>
@@ -196,7 +198,7 @@ function SubmitPage() {
                       <div className="relative rounded-2xl overflow-hidden border border-border group cursor-pointer">
                         <img src={imgPreview} alt="" className="w-full h-64 object-cover" />
                         <div className="absolute inset-0 bg-background/70 opacity-0 group-hover:opacity-100 transition-smooth flex items-center justify-center text-sm">
-                          Click to replace
+                          klik untuk mengganti foto
                         </div>
                       </div>
                     ) : (
@@ -204,8 +206,8 @@ function SubmitPage() {
                         <div className="h-12 w-12 rounded-full glass flex items-center justify-center mb-3">
                           <Upload size={20} className="text-accent" />
                         </div>
-                        <div className="text-sm font-medium">Click or drag image to upload</div>
-                        <div className="text-xs text-muted-foreground mt-1">A photo speeds up triage</div>
+                        <div className="text-sm font-medium">klik atau seret gambar untuk mengunggah</div>
+                        <div className="text-xs text-muted-foreground mt-1">gunakan foto yang jelas</div>
                       </div>
                     )}
                   </label>
@@ -220,7 +222,7 @@ function SubmitPage() {
               disabled={step === 0}
               className="px-4 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground transition-smooth flex items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed"
             >
-              <ChevronLeft size={15} /> Back
+              <ChevronLeft size={15} /> kembali
             </button>
             {step < 2 ? (
               <button
@@ -228,7 +230,7 @@ function SubmitPage() {
                 disabled={!canNext}
                 className="px-5 py-2.5 rounded-xl gradient-primary text-primary-foreground text-sm font-semibold shadow-glow hover:scale-[1.02] transition-smooth flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100"
               >
-                Continue <ChevronRight size={15} />
+                Lanjut <ChevronRight size={15} />
               </button>
             ) : (
               <button
@@ -236,7 +238,7 @@ function SubmitPage() {
                 disabled={!canNext}
                 className="px-6 py-2.5 rounded-xl gradient-primary text-primary-foreground text-sm font-semibold shadow-glow hover:scale-[1.02] transition-smooth flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <Check size={15} /> Submit Report
+                <Check size={15} /> Ajukan Laporan
               </button>
             )}
           </div>
@@ -251,9 +253,9 @@ function SubmitPage() {
           <div className="h-20 w-20 rounded-full gradient-primary mx-auto flex items-center justify-center shadow-glow mb-5">
             <Check size={36} className="text-primary-foreground" />
           </div>
-          <h2 className="font-display text-2xl font-bold">Report submitted!</h2>
+          <h2 className="font-display text-2xl font-bold">Laporan diajukan!</h2>
           <p className="text-muted-foreground mt-2 max-w-md mx-auto text-sm">
-            Tracking ID <span className="text-accent font-mono">RPT-2042</span>. We'll notify you the moment your report is reviewed.
+            ID Pelacakan <span className="text-accent font-mono">RPT-2042</span>. Kami akan memberi tahu Anda segera setelah laporan Anda ditinjau.
           </p>
         </motion.div>
         )}

@@ -1,3 +1,5 @@
+/*eslint-disable*/
+
 import wasteImg from "@/assets/report-waste.jpg";
 import potholeImg from "@/assets/report-pothole.jpg";
 import streetlightImg from "@/assets/report-streetlight.jpg";
@@ -21,16 +23,16 @@ export type Report = {
 };
 
 export const CATEGORIES: Record<Category, { label: string; color: string; emoji: string; icon: string }> = {
-  waste:   { label: "Waste Management",   color: "var(--cat-waste)",   emoji: "🗑️", icon: "Trash2" },
-  infra:   { label: "Infrastructure",     color: "var(--cat-infra)",   emoji: "🚧", icon: "Construction" },
-  disturb: { label: "Disturbance",        color: "var(--cat-disturb)", emoji: "⚠️", icon: "AlertTriangle" },
-  land:    { label: "Land / Social",      color: "var(--cat-land)",    emoji: "🏘️", icon: "MapPinned" },
+  waste:   { label: "Pengelolaan Sampah",   color: "var(--cat-waste)",   emoji: "🗑️", icon: "Trash2" },
+  infra:   { label: "Infrastruktur",     color: "var(--cat-infra)",   emoji: "🚧", icon: "Construction" },
+  disturb: { label: "Kegagalan Infrastruktur",        color: "var(--cat-disturb)", emoji: "⚠️", icon: "AlertTriangle" },
+  land:    { label: "Tanah / Sosial",      color: "var(--cat-land)",    emoji: "🏘️", icon: "MapPinned" },
 };
 
 export const STATUSES: Record<Status, { label: string; color: string }> = {
-  new:      { label: "New",         color: "var(--status-new)" },
-  progress: { label: "In Progress", color: "var(--status-progress)" },
-  resolved: { label: "Resolved",    color: "var(--status-resolved)" },
+  new:      { label: "Baru",         color: "var(--status-new)" },
+  progress: { label: "Dalam Proses", color: "var(--status-progress)" },
+  resolved: { label: "Selesai",    color: "var(--status-resolved)" },
 };
 
 // Indonesia administrative hierarchy (subset)
