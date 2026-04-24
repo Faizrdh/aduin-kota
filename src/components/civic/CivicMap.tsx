@@ -5,6 +5,13 @@ import L from "leaflet";
 import "leaflet.markercluster";
 import { CATEGORIES, STATUSES, type Report, type Category, type Status, timeAgo } from "@/data/reports";
 
+type FlyToTarget = {
+  center: [number, number];
+  zoom: number;
+  /** Increment ini setiap kali ingin trigger ulang flyTo ke koordinat yang sama */
+  seq?: number;
+};
+
 type Props = {
   reports: Report[];
   height?: string;
@@ -14,13 +21,15 @@ type Props = {
   pickedPos?: { lat: number; lng: number } | null;
   initialCenter?: [number, number];
   initialZoom?: number;
+  /** Ketika prop ini berubah, peta akan flyTo secara smooth ke target */
+  flyTo?: FlyToTarget | null;
 };
 
 const CATEGORY_HEX: Record<Category, string> = {
-  waste: "#7E2233",
-  infra: "#E5C100",
+  waste:   "#7E2233",
+  infra:   "#E5C100",
   disturb: "#E03A3A",
-  land: "#E08A2A",
+  land:    "#E08A2A",
 };
 
 function makeIcon(cat: Category, active = false) {
@@ -44,22 +53,24 @@ export function CivicMap({
   pickedPos = null,
   initialCenter = [-6.2088, 106.8200],
   initialZoom = 11,
+  flyTo = null,
 }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
-  const pickMarkerRef = useRef<L.Marker | null>(null);
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const mapRef         = useRef<L.Map | null>(null);
+  const clusterRef     = useRef<L.MarkerClusterGroup | null>(null);
+  const pickMarkerRef  = useRef<L.Marker | null>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
+  // ── Inisialisasi peta (hanya sekali) ──────────────────────────────────────
   useEffect(() => {
     if (!mounted || !containerRef.current || mapRef.current) return;
 
     const map = L.map(containerRef.current, {
-      center: initialCenter,
-      zoom: initialZoom,
-      zoomControl: true,
+      center:           initialCenter,
+      zoom:             initialZoom,
+      zoomControl:      true,
       attributionControl: true,
     });
     mapRef.current = map;
@@ -72,37 +83,51 @@ export function CivicMap({
     const cluster = (L as any).markerClusterGroup({
       iconCreateFunction: (c: any) => {
         const count = c.getChildCount();
-        const size = count < 10 ? 40 : count < 50 ? 50 : 60;
+        const size  = count < 10 ? 40 : count < 50 ? 50 : 60;
         return L.divIcon({
           html: `<div class="marker-cluster-custom" style="width:${size}px;height:${size}px;font-size:${count < 10 ? 13 : 14}px">${count}</div>`,
           className: "",
-          iconSize: [size, size],
+          iconSize:  [size, size],
         });
       },
       showCoverageOnHover: false,
-      spiderfyOnMaxZoom: true,
-      animate: true,
-      maxClusterRadius: 55,
+      spiderfyOnMaxZoom:   true,
+      animate:             true,
+      maxClusterRadius:    55,
     });
     clusterRef.current = cluster;
     map.addLayer(cluster);
 
     return () => {
       map.remove();
-      mapRef.current = null;
+      mapRef.current  = null;
       clusterRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted]);
 
-  // populate markers
+  // ── flyTo: animasi smooth ke wilayah yang dipilih ─────────────────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !flyTo) return;
+
+    map.flyTo(flyTo.center, flyTo.zoom, {
+      animate:      true,
+      duration:     1.4,          // detik — terasa responsif tanpa terlalu cepat
+      easeLinearity: 0.3,
+    });
+  // Gunakan JSON.stringify agar effect hanya jalan saat nilai benar-benar berubah
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(flyTo)]);
+
+  // ── Populate report markers ───────────────────────────────────────────────
   useEffect(() => {
     const cluster = clusterRef.current;
     if (!cluster) return;
     cluster.clearLayers();
     reports.forEach((r) => {
-      const m = L.marker([r.lat, r.lng], { icon: makeIcon(r.category) });
-      const cat = CATEGORIES[r.category];
+      const m   = L.marker([r.lat, r.lng], { icon: makeIcon(r.category) });
+      const cat  = CATEGORIES[r.category];
       const stat = STATUSES[r.status];
       m.bindPopup(
         `<div style="padding:0;width:260px;font-family:Inter,sans-serif">
@@ -129,7 +154,7 @@ export function CivicMap({
     });
   }, [reports, onSelect]);
 
-  // pick mode
+  // ── Pick mode (klik peta untuk pilih koordinat) ───────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -139,12 +164,10 @@ export function CivicMap({
     };
     map.on("click", handler);
     map.getContainer().style.cursor = pickMode ? "crosshair" : "";
-    return () => {
-      map.off("click", handler);
-    };
+    return () => { map.off("click", handler); };
   }, [pickMode, onPick]);
 
-  // picked marker
+  // ── Picked marker (pin biru saat user klik/GPS) ───────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -156,14 +179,20 @@ export function CivicMap({
       const icon = L.divIcon({
         className: "civic-marker",
         html: `<div class="pin" style="background:#82C8E5;--marker-glow:#82C8E5;box-shadow:0 0 0 6px #82C8E555,0 0 22px #82C8E5"></div>`,
-        iconSize: [32, 32],
+        iconSize:   [32, 32],
         iconAnchor: [16, 30],
       });
       pickMarkerRef.current = L.marker([pickedPos.lat, pickedPos.lng], { icon }).addTo(map);
     }
   }, [pickedPos]);
 
-  return <div ref={containerRef} style={{ height, width: "100%" }} className="rounded-2xl overflow-hidden" />;
+  return (
+    <div
+      ref={containerRef}
+      style={{ height, width: "100%" }}
+      className="rounded-2xl overflow-hidden"
+    />
+  );
 }
 
 function getStatusHex(s: Status) {
