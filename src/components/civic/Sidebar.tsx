@@ -1,15 +1,16 @@
 /*eslint-disable*/
 
 import { Link, useLocation } from "@tanstack/react-router";
-import { LayoutDashboard, Map as MapIcon, PlusCircle, FileText, BarChart3, Radio } from "lucide-react";
+import { LayoutDashboard, Map as MapIcon, PlusCircle, FileText, BarChart3, Radio, Inbox } from "lucide-react";
 import { motion } from "framer-motion";
 
 const NAV = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/map", label: "Peta Pengajuan", icon: MapIcon },
-  { to: "/submit", label: "Laporan Masuk", icon: PlusCircle },
-  { to: "/my-reports", label: "Laporan Saya", icon: FileText },
-  { to: "/analytics", label: "Data Analitik", icon: BarChart3 },
+  { to: "/",                label: "Dashboard",      icon: LayoutDashboard },
+  { to: "/map",             label: "Peta Pengajuan", icon: MapIcon         },
+  { to: "/submit",          label: "Buat Laporan",   icon: PlusCircle      },
+  { to: "/my-reports",      label: "Laporan Saya",   icon: FileText        },
+  { to: "/incoming-reports",label: "Laporan Masuk",  icon: Inbox           },
+  { to: "/analytics",       label: "Data Analitik",  icon: BarChart3       },
 ] as const;
 
 export function Sidebar() {
@@ -85,7 +86,7 @@ export function MobileTopbar() {
           <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center">
             <Radio className="h-4 w-4 text-primary-foreground" />
           </div>
-          <span className="font-display font-bold text-gradient">CivicSpot</span>
+          <span className="font-display font-bold text-gradient">AduinKota</span>
         </div>
       </div>
       <nav className="flex overflow-x-auto px-2 pb-2 gap-1 scrollbar-none">

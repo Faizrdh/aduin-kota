@@ -12,11 +12,19 @@ export default defineConfig({
   vite: {
     server: {
       proxy: {
-        // ── emsifa API Wilayah Indonesia ─────────────────────────────────────
-        // /api-wilayah/provinces.json
-        //   → https://emsifa.github.io/api-wilayah-indonesia/api/provinces.json
-        // /api-wilayah/regencies/11.json
-        //   → https://emsifa.github.io/api-wilayah-indonesia/api/regencies/11.json
+        // ── Express API — Auth ────────────────────────────────────────────────
+        "/api/auth": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
+        },
+
+        // ── Express API — Reports ─────────────────────────────────────────────
+        "/api/reports": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
+        },
+
+        // ── emsifa API Wilayah Indonesia ──────────────────────────────────────
         "/api-wilayah": {
           target: "https://emsifa.github.io",
           changeOrigin: true,
@@ -29,15 +37,7 @@ export default defineConfig({
           },
         },
 
-        // ── Nominatim OpenStreetMap (reverse & forward geocoding) ────────────
-        // /api-nominatim/reverse?lat=...&lon=...
-        //   → https://nominatim.openstreetmap.org/reverse?lat=...&lon=...
-        // /api-nominatim/search?q=...
-        //   → https://nominatim.openstreetmap.org/search?q=...
-        //
-        // PENTING: Nominatim WAJIB mendapat header User-Agent yang valid
-        // (berisi nama aplikasi + email kontak). Tanpa ini → HTTP 403.
-        // Header ini hanya bisa diset di sisi proxy/server, bukan dari browser.
+        // ── Nominatim OpenStreetMap ───────────────────────────────────────────
         "/api-nominatim": {
           target: "https://nominatim.openstreetmap.org",
           changeOrigin: true,

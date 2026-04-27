@@ -14,6 +14,7 @@ import { Route as MyReportsRouteImport } from './routes/my-reports'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LandingRouteImport } from './routes/landing'
+import { Route as IncomingReportsRouteImport } from './routes/incoming-reports'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -42,6 +43,11 @@ const LandingRoute = LandingRouteImport.update({
   path: '/landing',
   getParentRoute: () => rootRouteImport,
 } as any)
+const IncomingReportsRoute = IncomingReportsRouteImport.update({
+  id: '/incoming-reports',
+  path: '/incoming-reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AnalyticsRoute = AnalyticsRouteImport.update({
   id: '/analytics',
   path: '/analytics',
@@ -56,6 +62,7 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
+  '/incoming-reports': typeof IncomingReportsRoute
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/map': typeof MapRoute
@@ -65,6 +72,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
+  '/incoming-reports': typeof IncomingReportsRoute
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/map': typeof MapRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
+  '/incoming-reports': typeof IncomingReportsRoute
   '/landing': typeof LandingRoute
   '/login': typeof LoginRoute
   '/map': typeof MapRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/analytics'
+    | '/incoming-reports'
     | '/landing'
     | '/login'
     | '/map'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/analytics'
+    | '/incoming-reports'
     | '/landing'
     | '/login'
     | '/map'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/analytics'
+    | '/incoming-reports'
     | '/landing'
     | '/login'
     | '/map'
@@ -114,6 +126,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnalyticsRoute: typeof AnalyticsRoute
+  IncomingReportsRoute: typeof IncomingReportsRoute
   LandingRoute: typeof LandingRoute
   LoginRoute: typeof LoginRoute
   MapRoute: typeof MapRoute
@@ -158,6 +171,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LandingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/incoming-reports': {
+      id: '/incoming-reports'
+      path: '/incoming-reports'
+      fullPath: '/incoming-reports'
+      preLoaderRoute: typeof IncomingReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/analytics': {
       id: '/analytics'
       path: '/analytics'
@@ -178,6 +198,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnalyticsRoute: AnalyticsRoute,
+  IncomingReportsRoute: IncomingReportsRoute,
   LandingRoute: LandingRoute,
   LoginRoute: LoginRoute,
   MapRoute: MapRoute,

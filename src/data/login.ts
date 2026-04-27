@@ -1,105 +1,106 @@
 /*eslint-disable*/
-export interface User {
-  id: string;
-  name: string;
+// src/data/login.ts
+// Menyimpan accessToken di memori (tidak di localStorage agar aman XSS)
+// Token otomatis di-refresh lewat cookie refresh token
+
+const API = "/api/auth";
+
+// ─── In-memory token store ────────────────────────────────────────────────────
+let _accessToken: string | null = null;
+
+export function getAccessToken(): string | null {
+  return _accessToken;
+}
+export function setAccessToken(token: string | null): void {
+  _accessToken = token;
+}
+
+// ─── Helper: fetch dengan Bearer token otomatis ───────────────────────────────
+// Gunakan ini di seluruh app untuk semua request yang butuh auth
+export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const token = getAccessToken();
+  return fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers ?? {}),
+    },
+    credentials: "include", // kirim cookie refresh token
+  });
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+export interface AuthUser {
+  id:    string;
+  name:  string;
   email: string;
-  password: string; // plain-text for mock only — never do this in production
-  role: "citizen" | "admin" | "officer";
-  city: string;
-  avatar?: string;
+  role:  string;
+  city:  string;
 }
 
-export const USERS: User[] = [
-  {
-    id: "usr_001",
-    name: "demo",
-    email: "demo@aduinkota.id",
-    password: "demo123",
-    role: "citizen",
-    city: "Jakarta",
-  },
-  {
-    id: "usr_002",
-    name: "officer",
-    email: "officer@aduinkota.id",
-    password: "officer123",
-    role: "officer",
-    city: "Bandung",
-  },
-  {
-    id: "usr_003",
-    name: "Admin Kota",
-    email: "admin@aduinkota.id",
-    password: "admin123",
-    role: "admin",
-    city: "Jakarta",
-  },
-  // ── Add more users here ───
-  // {
-  //   id: "usr_004",
-  //   name: "Nama Lengkap",
-  //   email: "email@domain.com",
-  //   password: "password",
-  //   role: "citizen",
-  //   city: "Surabaya",
-  // },
-];
+// ─── authenticate (login) ─────────────────────────────────────────────────────
+export async function authenticate(email: string, password: string): Promise<AuthUser> {
+  const res = await fetch(`${API}/login`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ email, password }),
+    credentials: "include",
+  });
 
-// ─── Auth helpers ─────────────────────────────────────────────────────────────
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.error ?? "Login gagal.");
 
-/** Find a user by email + password. Returns the user or null. */
-export function authenticate(email: string, password: string): User | null {
-  return (
-    USERS.find(
-      (u) =>
-        u.email.toLowerCase() === email.toLowerCase() &&
-        u.password === password
-    ) ?? null
-  );
-
+  setAccessToken(json.accessToken);
+  return json.user as AuthUser;
 }
 
-/** Register a new user (adds to in-memory list; resets on page refresh). */
-export function register(
+// ─── register ─────────────────────────────────────────────────────────────────
+export async function register(
   name: string,
   email: string,
   password: string,
-  city = "Jakarta"
-): { success: boolean; error?: string; user?: User } {
-  const exists = USERS.find(
-    (u) => u.email.toLowerCase() === email.toLowerCase()
-  );
-  if (exists) return { success: false, error: "Email sudah terdaftar." };
-
-  const newUser: User = {
-    id: `usr_${String(USERS.length + 1).padStart(3, "0")}`,
-    name,
-    email,
-    password,
-    role: "citizen",
-    city,
-  };
-  USERS.push(newUser);
-  return { success: true, user: newUser };
-}
-
-// ─── Session helpers (sessionStorage — clears on tab close) ──────────────────
-
-const SESSION_KEY = "aduinkota_user";
-
-export function saveSession(user: User) {
-  sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
-}
-
-export function getSession(): User | null {
+  city: string,
+): Promise<{ success: true; user: AuthUser } | { success: false; error: string }> {
   try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as User) : null;
-  } catch {
-    return null;
+    const res = await fetch(`${API}/register`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ name, email, password, city }),
+      credentials: "include",
+    });
+
+    const json = await res.json();
+    if (!res.ok) return { success: false, error: json.error ?? "Pendaftaran gagal." };
+
+    setAccessToken(json.accessToken);
+    return { success: true, user: json.user as AuthUser };
+  } catch (err: any) {
+    return { success: false, error: err?.message ?? "Terjadi kesalahan jaringan." };
   }
 }
 
-export function clearSession() {
-  sessionStorage.removeItem(SESSION_KEY);
+// ─── logout ───────────────────────────────────────────────────────────────────
+export async function logout(): Promise<void> {
+  await fetch(`${API}/logout`, {
+    method:      "POST",
+    credentials: "include",
+  }).catch(() => {});
+  setAccessToken(null);
+}
+
+// ─── refresh — panggil saat app pertama kali load ─────────────────────────────
+export async function refreshSession(): Promise<AuthUser | null> {
+  try {
+    const res = await fetch(`${API}/refresh`, {
+      method:      "POST",
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    setAccessToken(json.accessToken);
+    return json.user as AuthUser;
+  } catch {
+    return null;
+  }
 }

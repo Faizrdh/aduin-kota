@@ -6,7 +6,7 @@ import streetlightImg from "@/assets/report-streetlight.jpg";
 import floodImg from "@/assets/report-flood.jpg";
 
 export type Category = "waste" | "infra" | "disturb" | "land";
-export type Status = "new" | "progress" | "resolved";
+export type Status = "new" | "progress" | "resolved" | "cancelled";
 
 export type Report = {
   id: string;
@@ -33,6 +33,7 @@ export const STATUSES: Record<Status, { label: string; color: string }> = {
   new:      { label: "Baru",         color: "var(--status-new)" },
   progress: { label: "Dalam Proses", color: "var(--status-progress)" },
   resolved: { label: "Selesai",    color: "var(--status-resolved)" },
+  cancelled: { label: "Dibatalkan",    color: "var(--status-cancelled)" },
 };
 
 // Indonesia administrative hierarchy (subset)

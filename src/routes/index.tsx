@@ -1,169 +1,483 @@
 /*eslint-disable*/
+// src/routes/index.tsx
 
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { motion } from "framer-motion";
-import { ArrowUpRight, Activity, Clock, CheckCircle2, AlertCircle, MapPin, Plus, TrendingUp } from "lucide-react";
-import { CATEGORIES, REPORTS, getStats, timeAgo } from "@/data/reports";
+import { useState, useEffect, useCallback } from "react";
+import {
+  ArrowUpRight, Activity, Clock, CheckCircle2, AlertCircle,
+  MapPin, Plus, TrendingUp, Loader2, AlertTriangle, RefreshCw,
+} from "lucide-react";
+import { authFetch } from "@/data/login";
 import { StatusBadge, CategoryBadge } from "@/components/civic/StatusBadge";
 
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Overview — CivicSpot" },
-      { name: "description", content: "Overview of city reports, statuses, and response performance." },
+      { title: "Overview — AduinKota" },
+      { name: "description", content: "Tayangan nyata pengaduan masyarakat Indonesia." },
     ],
   }),
   component: Dashboard,
 });
 
-function Dashboard() {
-  const stats = getStats(REPORTS);
-  const recent = [...REPORTS].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, 6);
+// ─── Types ────────────────────────────────────────────────────────────────────
+type DbStatus   = "PENDING" | "IN_REVIEW" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
+type DbCategory = "WASTE" | "INFRA" | "DISTURB" | "LAND";
 
+interface ApiReport {
+  id: string;
+  title: string;
+  description: string;
+  category: DbCategory;
+  status: DbStatus;
+  province: string;
+  city: string;
+  district: string;
+  village: string;
+  address: string | null;
+  imageUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+  user: { id: string; name: string; avatar: string | null };
+  _count: { joins: number };
+}
+
+interface ApiStats {
+  total: number;
+  pending: number;
+  inProgress: number;
+  resolved: number;
+  rejected: number;
+}
+
+interface ApiReportsResponse {
+  data: ApiReport[];
+  meta: { total: number; page: number; limit: number; totalPages: number };
+}
+
+// ─── Mappings ─────────────────────────────────────────────────────────────────
+const CATEGORY_DISPLAY: Record<DbCategory, { label: string; color: string }> = {
+  WASTE:   { label: "Pengelolaan Sampah",  color: "red"   },
+  INFRA:   { label: "Infrastruktur",       color: "blue"  },
+  DISTURB: { label: "Gangguan Ketertiban", color: "amber" },
+  LAND:    { label: "Tanah / Sosial",      color: "green" },
+};
+
+const STATUS_DISPLAY: Record<DbStatus, { label: string; variant: string }> = {
+  PENDING:     { label: "Baru",         variant: "new"      },
+  IN_REVIEW:   { label: "Dalam Review", variant: "progress" },
+  IN_PROGRESS: { label: "Dalam Proses", variant: "progress" },
+  RESOLVED:    { label: "Selesai",      variant: "resolved" },
+  REJECTED:    { label: "Ditolak",      variant: "rejected" },
+};
+
+const PLACEHOLDER_IMG =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%231e293b'/%3E%3Ctext x='32' y='36' text-anchor='middle' fill='%2364748b' font-size='10' font-family='sans-serif'%3ENo img%3C/text%3E%3C/svg%3E";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function timeAgo(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const d = Math.floor(diff / 86_400_000);
+  const h = Math.floor(diff / 3_600_000);
+  const m = Math.floor(diff / 60_000);
+  if (m < 1) return "Baru saja";
+  if (h < 1) return `${m}m lalu`;
+  if (d < 1) return `${h}j lalu`;
+  if (d === 1) return "Kemarin";
+  return `${d}h lalu`;
+}
+
+function toTitle(s: string) {
+  return s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+function Skeleton({ className }: { className?: string }) {
+  return (
+    <div className={`animate-pulse rounded-lg bg-white/5 ${className ?? ""}`} />
+  );
+}
+
+// ─── Stat Card ─────────────────────────────────────────────────────────────────
+function StatCard({
+  label, value, sub, icon: Icon, accent, delay,
+}: {
+  label: string; value: number | string; sub: string;
+  icon: React.ElementType; accent: string; delay: number;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay, duration: 0.4 }}
+      className="glass rounded-2xl p-5 hover:-translate-y-0.5 transition-smooth shadow-soft relative overflow-hidden group"
+    >
+      <div
+        className="absolute -right-8 -top-8 h-32 w-32 rounded-full opacity-20 blur-2xl transition-smooth group-hover:opacity-40"
+        style={{ background: accent }}
+      />
+      <div className="flex items-center justify-between mb-4 relative">
+        <span className="text-xs uppercase tracking-wider text-muted-foreground">{label}</span>
+        <Icon size={16} style={{ color: accent }} />
+      </div>
+      <div className="font-display text-3xl font-bold relative">{value}</div>
+      <div className="text-xs text-muted-foreground mt-1 relative">{sub}</div>
+    </motion.div>
+  );
+}
+
+// ─── Category Bar ─────────────────────────────────────────────────────────────
+function CategoryBar({
+  category, count, total,
+}: {
+  category: DbCategory; count: number; total: number;
+}) {
+  const cat = CATEGORY_DISPLAY[category];
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+
+  // Map color string ke CSS var / tailwind color
+  const colorMap: Record<string, string> = {
+    red:   "var(--status-rejected, #ef4444)",
+    blue:  "var(--status-progress, #3b82f6)",
+    amber: "var(--status-new, #f59e0b)",
+    green: "var(--status-resolved, #10b981)",
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between text-xs mb-1.5">
+        <span className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full" style={{ background: colorMap[cat.color] ?? "#64748b" }} />
+          {cat.label}
+        </span>
+        <span className="text-muted-foreground">{count}</span>
+      </div>
+      <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
+        <motion.div
+          className="h-full rounded-full"
+          style={{ background: colorMap[cat.color] ?? "#64748b" }}
+          initial={{ width: 0 }}
+          animate={{ width: `${pct}%` }}
+          transition={{ duration: 0.8, ease: "easeOut" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+function Dashboard() {
+  const [stats,        setStats]        = useState<ApiStats | null>(null);
+  const [recent,       setRecent]       = useState<ApiReport[]>([]);
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [feedLoading,  setFeedLoading]  = useState(true);
+  const [error,        setError]        = useState<string | null>(null);
+
+  // Hitung distribusi kategori dari laporan yang sudah diambil
+  const categoryCounts: Record<DbCategory, number> = {
+    WASTE: 0, INFRA: 0, DISTURB: 0, LAND: 0,
+  };
+  recent.forEach((r) => {
+    if (r.category in categoryCounts) categoryCounts[r.category]++;
+  });
+
+  // ── Fetch stats ──
+  const fetchStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const res = await authFetch("/api/reports/stats");
+      if (res.ok) {
+        const data: ApiStats = await res.json();
+        setStats(data);
+      }
+    } catch {
+      // stats gagal tidak blokir halaman
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
+  // ── Fetch 6 laporan terbaru ──
+  const fetchRecent = useCallback(async () => {
+    setFeedLoading(true);
+    setError(null);
+    try {
+      const res = await authFetch("/api/reports/all?page=1&limit=6");
+      if (res.status === 401) { setError("Sesi habis. Silakan login kembali."); return; }
+      if (!res.ok) { setError(`Gagal memuat data (${res.status})`); return; }
+      const json: ApiReportsResponse = await res.json();
+      // Urutkan dari yang terbaru
+      const sorted = [...(json.data ?? [])].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setRecent(sorted.slice(0, 6));
+    } catch {
+      setError("Tidak dapat terhubung ke server.");
+    } finally {
+      setFeedLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchStats();  }, [fetchStats]);
+  useEffect(() => { fetchRecent(); }, [fetchRecent]);
+
+  // ── Stat card config ──
   const statCards = [
-    { label: "Total Reports", value: stats.total, sub: "+12 this week", icon: Activity, accent: "var(--primary)" },
-    { label: "Open", value: stats.open, sub: "Awaiting review", icon: AlertCircle, accent: "var(--status-new)" },
-    { label: "In Progress", value: stats.progress, sub: "Crews dispatched", icon: Clock, accent: "var(--status-progress)" },
-    { label: "Resolved", value: stats.resolved, sub: "Avg. 2.4h response", icon: CheckCircle2, accent: "var(--status-resolved)" },
+    {
+      label: "Total Laporan",
+      value: statsLoading ? "…" : (stats?.total ?? 0),
+      sub:   "Semua laporan masuk",
+      icon:  Activity,
+      accent: "var(--primary)",
+    },
+    {
+      label: "Baru / Pending",
+      value: statsLoading ? "…" : (stats?.pending ?? 0),
+      sub:   "Menunggu peninjauan",
+      icon:  AlertCircle,
+      accent: "var(--status-new, #f59e0b)",
+    },
+    {
+      label: "Dalam Proses",
+      value: statsLoading ? "…" : (stats?.inProgress ?? 0),
+      sub:   "Sedang ditangani",
+      icon:  Clock,
+      accent: "var(--status-progress, #3b82f6)",
+    },
+    {
+      label: "Selesai",
+      value: statsLoading ? "…" : (stats?.resolved ?? 0),
+      sub:   "Laporan diselesaikan",
+      icon:  CheckCircle2,
+      accent: "var(--status-resolved, #10b981)",
+    },
   ];
 
   return (
     <main className="flex-1 px-5 md:px-10 py-8 max-w-[1500px] w-full mx-auto">
-      {/* Hero */}
+
+      {/* ── Hero ── */}
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
         <div>
-          <div className="text-xs uppercase tracking-[0.25em] text-accent mb-2">tayangan nyata pengaduan · Indonesia</div>
+          <div className="text-xs uppercase tracking-[0.25em] text-accent mb-2">
+            tayangan nyata pengaduan · Indonesia
+          </div>
           <h1 className="font-display text-4xl md:text-5xl font-bold text-gradient leading-tight">
             Pengaduan Masyarakat, Indonesia<br className="hidden md:block" /> secara nyata.
           </h1>
           <p className="text-muted-foreground mt-3 max-w-xl text-sm md:text-base">
-            Track reports across Jakarta, Bandung, Surabaya and Bali. Coordinate response, measure impact, and keep citizens informed.
+            Pantau laporan dari seluruh Indonesia. Koordinasikan respons, ukur dampak, dan
+            jaga masyarakat tetap terinformasi.
           </p>
         </div>
-        <div className="flex gap-3">
-          <Link to="/map" className="px-4 py-2.5 rounded-xl glass-strong text-sm font-medium hover:bg-white/10 transition-smooth flex items-center gap-2">
+        <div className="flex gap-3 shrink-0">
+          <Link
+            to="/map"
+            className="px-4 py-2.5 rounded-xl glass-strong text-sm font-medium hover:bg-white/10 transition-smooth flex items-center gap-2"
+          >
             Buka Peta <ArrowUpRight size={15} />
           </Link>
-          <Link to="/submit" className="px-4 py-2.5 rounded-xl gradient-primary text-primary-foreground text-sm font-semibold shadow-glow hover:scale-[1.02] transition-smooth flex items-center gap-2">
+          <Link
+            to="/submit"
+            className="px-4 py-2.5 rounded-xl gradient-primary text-primary-foreground text-sm font-semibold shadow-glow hover:scale-[1.02] transition-smooth flex items-center gap-2"
+          >
             <Plus size={15} /> Buat Pengaduan
           </Link>
         </div>
       </header>
 
-      {/* Stat cards */}
+      {/* ── Stat Cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {statCards.map((s, i) => (
-          <motion.div
-            key={s.label}
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.06, duration: 0.4 }}
-            className="glass rounded-2xl p-5 hover:-translate-y-0.5 transition-smooth shadow-soft relative overflow-hidden group"
-          >
-            <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full opacity-20 blur-2xl transition-smooth group-hover:opacity-40"
-                 style={{ background: s.accent }} />
-            <div className="flex items-center justify-between mb-4 relative">
-              <span className="text-xs uppercase tracking-wider text-muted-foreground">{s.label}</span>
-              <s.icon size={16} style={{ color: s.accent }} />
-            </div>
-            <div className="font-display text-3xl font-bold relative">{s.value}</div>
-            <div className="text-xs text-muted-foreground mt-1 relative">{s.sub}</div>
-          </motion.div>
+          <StatCard key={s.label} {...s} delay={i * 0.06} />
         ))}
       </div>
 
-      {/* Two-col */}
+      {/* ── Two-col layout ── */}
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Recent feed */}
+
+        {/* ── Recent Feed ── */}
         <div className="lg:col-span-2 glass rounded-2xl p-6 shadow-soft">
           <div className="flex items-center justify-between mb-5">
             <div>
               <h2 className="font-display text-xl font-semibold">Pengaduan Sebelumnya</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Live citizen submissions across the network</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Laporan terbaru dari masyarakat
+              </p>
             </div>
-            <Link to="/my-reports" className="text-xs text-accent hover:underline">Lihat Semua →</Link>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={fetchRecent}
+                className="text-xs text-muted-foreground hover:text-foreground transition-smooth flex items-center gap-1.5"
+              >
+                <RefreshCw size={12} /> Refresh
+              </button>
+              <Link to="/incoming-reports" className="text-xs text-accent hover:underline">
+                Lihat Semua →
+              </Link>
+            </div>
           </div>
-          <div className="space-y-2">
-            {recent.map((r) => {
-              const cat = CATEGORIES[r.category];
-              return (
-                <Link
-                  key={r.id}
-                  to="/map"
-                  className="flex items-center gap-4 p-3 rounded-xl hover:bg-white/5 transition-smooth border border-transparent hover:border-border"
-                >
-                  <img src={r.image} alt={r.title} loading="lazy" className="h-14 w-14 rounded-lg object-cover" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <CategoryBadge category={cat.color} label={cat.label} />
-                      <StatusBadge status={r.status} />
-                    </div>
-                    <div className="text-sm font-medium truncate">{r.title}</div>
-                    <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                      <MapPin size={11} /> {r.region.subdistrict}, {r.region.city} · {timeAgo(r.createdAt)}
-                    </div>
+
+          {/* Loading state */}
+          {feedLoading && (
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4 p-3 rounded-xl">
+                  <Skeleton className="h-14 w-14 shrink-0 rounded-lg" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-3 w-24" />
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
                   </div>
-                </Link>
-              );
-            })}
-          </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Error state */}
+          {!feedLoading && error && (
+            <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
+              <div className="h-10 w-10 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                <AlertTriangle size={18} className="text-red-400" />
+              </div>
+              <p className="text-sm text-red-300 text-center">{error}</p>
+              <button onClick={fetchRecent} className="text-xs text-accent hover:underline">
+                Coba lagi
+              </button>
+            </div>
+          )}
+
+          {/* Data */}
+          {!feedLoading && !error && (
+            <div className="space-y-2">
+              {recent.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-10">
+                  Belum ada laporan.
+                </p>
+              )}
+              {recent.map((r, i) => {
+                const cat    = CATEGORY_DISPLAY[r.category] ?? { label: r.category, color: "gray" };
+                const status = STATUS_DISPLAY[r.status]     ?? { label: r.status, variant: "new" };
+                return (
+                  <motion.div
+                    key={r.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                  >
+                    <Link
+                      to="/map"
+                      className="flex items-center gap-4 p-3 rounded-xl hover:bg-white/5 transition-smooth border border-transparent hover:border-border"
+                    >
+                      <img
+                        src={r.imageUrl ?? PLACEHOLDER_IMG}
+                        alt={r.title}
+                        loading="lazy"
+                        onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
+                        className="h-14 w-14 rounded-lg object-cover shrink-0 border border-border/30"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                          <CategoryBadge category={cat.color} label={cat.label} />
+                          <StatusBadge status={status.variant as any} />
+                        </div>
+                        <div className="text-sm font-medium truncate">{r.title}</div>
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                          <MapPin size={11} />
+                          {toTitle(r.village)}, {toTitle(r.city)} · {timeAgo(r.createdAt)}
+                        </div>
+                      </div>
+                    </Link>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
-        {/* Side column */}
+        {/* ── Side Column ── */}
         <div className="space-y-6">
+
+          {/* Performa Card */}
           <div className="glass rounded-2xl p-6 shadow-soft relative overflow-hidden">
             <div className="absolute -bottom-12 -right-12 h-48 w-48 rounded-full gradient-primary opacity-30 blur-3xl" />
             <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-accent mb-3 relative">
               <TrendingUp size={14} /> performa pengaduan
             </div>
-            <div className="font-display text-3xl font-bold relative">24 Jam</div>
-            <div className="text-sm text-muted-foreground relative">rata rata pengaduan</div>
-            <div className="mt-5 grid grid-cols-2 gap-3 relative">
-              {[
-                { l: "Resolution rate", v: "87%" },
-                { l: "Citizen rating", v: "4.6 / 5" },
-              ].map((m) => (
-                <div key={m.l} className="rounded-xl bg-white/5 p-3">
-                  <div className="text-[11px] text-muted-foreground">{m.l}</div>
-                  <div className="font-semibold mt-0.5">{m.v}</div>
+
+            {statsLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-8 w-20" />
+                <Skeleton className="h-4 w-32" />
+              </div>
+            ) : (
+              <>
+                <div className="font-display text-3xl font-bold relative">
+                  {stats ? `${stats.resolved} / ${stats.total}` : "—"}
                 </div>
-              ))}
+                <div className="text-sm text-muted-foreground relative">laporan diselesaikan</div>
+              </>
+            )}
+
+            <div className="mt-5 grid grid-cols-2 gap-3 relative">
+              <div className="rounded-xl bg-white/5 p-3">
+                <div className="text-[11px] text-muted-foreground">Resolution rate</div>
+                <div className="font-semibold mt-0.5">
+                  {statsLoading ? "…" : stats && stats.total > 0
+                    ? `${Math.round((stats.resolved / stats.total) * 100)}%`
+                    : "—"}
+                </div>
+              </div>
+              <div className="rounded-xl bg-white/5 p-3">
+                <div className="text-[11px] text-muted-foreground">Ditolak</div>
+                <div className="font-semibold mt-0.5">
+                  {statsLoading ? "…" : stats?.rejected ?? 0}
+                </div>
+              </div>
             </div>
           </div>
 
+          {/* Category Distribution */}
           <div className="glass rounded-2xl p-6 shadow-soft">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold">jenis category</h3>
-              <Link to="/analytics" className="text-xs text-accent hover:underline">Detail →</Link>
+              <h3 className="font-semibold">Jenis Kategori</h3>
+              <Link to="/analytics" className="text-xs text-accent hover:underline">
+                Detail →
+              </Link>
             </div>
-            <div className="space-y-3">
-              {(Object.keys(CATEGORIES) as Array<keyof typeof CATEGORIES>).map((k) => {
-                const cat = CATEGORIES[k];
-                const count = REPORTS.filter((r) => r.category === k).length;
-                const pct = Math.round((count / REPORTS.length) * 100);
-                return (
-                  <div key={k}>
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full" style={{ background: cat.color }} />
-                        {cat.label}
-                      </span>
-                      <span className="text-muted-foreground">{count}</span>
+
+            {feedLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="space-y-1.5">
+                    <div className="flex justify-between">
+                      <Skeleton className="h-3 w-28" />
+                      <Skeleton className="h-3 w-6" />
                     </div>
-                    <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
-                      <motion.div
-                        className="h-full rounded-full"
-                        style={{ background: cat.color }}
-                        initial={{ width: 0 }}
-                        animate={{ width: `${pct}%` }}
-                        transition={{ duration: 0.8, ease: "easeOut" }}
-                      />
-                    </div>
+                    <Skeleton className="h-1.5 w-full" />
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {(Object.keys(CATEGORY_DISPLAY) as DbCategory[]).map((k) => (
+                  <CategoryBar
+                    key={k}
+                    category={k}
+                    count={categoryCounts[k]}
+                    total={recent.length}
+                  />
+                ))}
+                {recent.length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-4">
+                    Tidak ada data kategori.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
+
         </div>
       </div>
     </main>

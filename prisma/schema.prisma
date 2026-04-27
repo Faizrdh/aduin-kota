@@ -1,0 +1,115 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  CITIZEN
+  OFFICER
+  ADMIN
+}
+
+enum ReportCategory {
+  WASTE
+  INFRA
+  DISTURB
+  LAND
+}
+
+enum ReportStatus {
+  PENDING
+  IN_REVIEW
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(CITIZEN)
+  city      String   @default("Jakarta")
+  avatar    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+  reports       Report[]
+  reportJoins   ReportJoin[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revoked   Boolean  @default(false)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Report {
+  id          String         @id @default(cuid())
+  title       String
+  description String
+  category    ReportCategory
+  status      ReportStatus   @default(PENDING)
+
+  // ── Lokasi ──
+  lat         Float
+  lng         Float
+  province    String
+  city        String
+  district    String         // kecamatan
+  village     String         // kelurahan/desa
+  address     String?        // alamat detail (opsional)
+  imageUrl    String?
+
+  // ── Relasi ──
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joins       ReportJoin[]
+
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // Index lat/lng untuk query bounding-box (radius filter awal)
+  @@index([lat, lng])
+  @@index([category])
+  @@index([status])
+  @@index([userId])
+  @@map("reports")
+}
+
+// Tabel untuk "ikut laporan" — user bergabung ke laporan yang sudah ada
+model ReportJoin {
+  id        String   @id @default(cuid())
+  reportId  String
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  note      String?  // catatan tambahan dari user yang ikut (opsional)
+  createdAt DateTime @default(now())
+
+  @@unique([reportId, userId]) 
+  @@index([reportId])
+  @@index([userId])
+  @@map("report_joins")
+}

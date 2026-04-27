@@ -18,7 +18,11 @@ type Props = {
   onSelect?: (r: Report) => void;
   pickMode?: boolean;
   onPick?: (lat: number, lng: number) => void;
+  /** Dipanggil ketika user selesai men-drag pin (dragend) */
+  onDrag?: (lat: number, lng: number) => void;
   pickedPos?: { lat: number; lng: number } | null;
+  /** Jika true, pin yang ditempatkan bisa di-drag */
+  draggable?: boolean;
   initialCenter?: [number, number];
   initialZoom?: number;
   /** Ketika prop ini berubah, peta akan flyTo secara smooth ke target */
@@ -44,22 +48,45 @@ function makeIcon(cat: Category, active = false) {
   });
 }
 
+/** Icon untuk pin yang bisa di-drag — sedikit lebih besar agar mudah di-grab */
+function makePickIcon(isDraggable: boolean) {
+  const shadow = isDraggable
+    ? "box-shadow:0 0 0 6px #82C8E555,0 0 22px #82C8E5,0 4px 12px rgba(0,0,0,.4);"
+    : "box-shadow:0 0 0 6px #82C8E555,0 0 22px #82C8E5;";
+  const cursor = isDraggable ? "cursor:grab;" : "";
+  return L.divIcon({
+    className: "civic-marker",
+    html: `<div class="pin" style="background:#82C8E5;--marker-glow:#82C8E5;${shadow}${cursor}"></div>`,
+    iconSize:   [32, 32],
+    iconAnchor: [16, 30],
+  });
+}
+
 export function CivicMap({
   reports,
   height = "100%",
   onSelect,
   pickMode = false,
   onPick,
+  onDrag,
   pickedPos = null,
+  draggable = false,
   initialCenter = [-6.2088, 106.8200],
   initialZoom = 11,
   flyTo = null,
 }: Props) {
-  const containerRef   = useRef<HTMLDivElement>(null);
-  const mapRef         = useRef<L.Map | null>(null);
-  const clusterRef     = useRef<L.MarkerClusterGroup | null>(null);
-  const pickMarkerRef  = useRef<L.Marker | null>(null);
+  const containerRef  = useRef<HTMLDivElement>(null);
+  const mapRef        = useRef<L.Map | null>(null);
+  const clusterRef    = useRef<L.MarkerClusterGroup | null>(null);
+  const pickMarkerRef = useRef<L.Marker | null>(null);
   const [mounted, setMounted] = useState(false);
+
+  // Simpan callback terbaru ke ref agar efek marker tidak perlu di-recreate
+  // setiap kali onDrag / onPick berubah referensinya
+  const onDragRef = useRef(onDrag);
+  const onPickRef = useRef(onPick);
+  useEffect(() => { onDragRef.current = onDrag; }, [onDrag]);
+  useEffect(() => { onPickRef.current = onPick; }, [onPick]);
 
   useEffect(() => setMounted(true), []);
 
@@ -68,9 +95,9 @@ export function CivicMap({
     if (!mounted || !containerRef.current || mapRef.current) return;
 
     const map = L.map(containerRef.current, {
-      center:           initialCenter,
-      zoom:             initialZoom,
-      zoomControl:      true,
+      center:             initialCenter,
+      zoom:               initialZoom,
+      zoomControl:        true,
       attributionControl: true,
     });
     mapRef.current = map;
@@ -100,7 +127,7 @@ export function CivicMap({
 
     return () => {
       map.remove();
-      mapRef.current  = null;
+      mapRef.current     = null;
       clusterRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -112,11 +139,10 @@ export function CivicMap({
     if (!map || !flyTo) return;
 
     map.flyTo(flyTo.center, flyTo.zoom, {
-      animate:      true,
-      duration:     1.4,          // detik — terasa responsif tanpa terlalu cepat
+      animate:       true,
+      duration:      1.4,
       easeLinearity: 0.3,
     });
-  // Gunakan JSON.stringify agar effect hanya jalan saat nilai benar-benar berubah
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(flyTo)]);
 
@@ -154,37 +180,74 @@ export function CivicMap({
     });
   }, [reports, onSelect]);
 
-  // ── Pick mode (klik peta untuk pilih koordinat) ───────────────────────────
+  // ── Pick mode: klik peta untuk memilih koordinat ─────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const handler = (e: L.LeafletMouseEvent) => {
       if (!pickMode) return;
-      onPick?.(e.latlng.lat, e.latlng.lng);
+      onPickRef.current?.(e.latlng.lat, e.latlng.lng);
     };
     map.on("click", handler);
     map.getContainer().style.cursor = pickMode ? "crosshair" : "";
     return () => { map.off("click", handler); };
-  }, [pickMode, onPick]);
+  }, [pickMode]);
 
-  // ── Picked marker (pin biru saat user klik/GPS) ───────────────────────────
+  // ── Picked marker: pin biru yang bisa di-drag ────────────────────────────
+  //
+  // Dibuat ulang setiap kali pickedPos atau draggable berubah.
+  // Marker dibuat dengan opsi { draggable } sehingga Leaflet langsung
+  // mengaktifkan drag handle tanpa perlu plugin tambahan.
+  // Event "dragend" mengambil posisi baru dan memanggil onDrag (via ref
+  // agar selalu menggunakan callback terbaru dari parent).
+  //
+  // Cursor "grab" / "grabbing" diset langsung pada elemen icon via CSS
+  // sehingga konsisten antar-browser tanpa harus override style Leaflet.
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+
+    // Bersihkan marker lama
     if (pickMarkerRef.current) {
       map.removeLayer(pickMarkerRef.current);
       pickMarkerRef.current = null;
     }
-    if (pickedPos) {
-      const icon = L.divIcon({
-        className: "civic-marker",
-        html: `<div class="pin" style="background:#82C8E5;--marker-glow:#82C8E5;box-shadow:0 0 0 6px #82C8E555,0 0 22px #82C8E5"></div>`,
-        iconSize:   [32, 32],
-        iconAnchor: [16, 30],
+
+    if (!pickedPos) return;
+
+    const marker = L.marker([pickedPos.lat, pickedPos.lng], {
+      icon:     makePickIcon(draggable),
+      draggable,
+    }).addTo(map);
+
+    // Ketika drag selesai, panggil onDrag dengan koordinat presisi baru
+    if (draggable) {
+      marker.on("dragstart", () => {
+        // Ubah cursor menjadi "grabbing" selama drag berlangsung
+        const el = marker.getElement();
+        if (el) el.style.cursor = "grabbing";
       });
-      pickMarkerRef.current = L.marker([pickedPos.lat, pickedPos.lng], { icon }).addTo(map);
+
+      marker.on("dragend", () => {
+        const { lat, lng } = marker.getLatLng();
+        // Kembalikan cursor ke "grab" setelah drag selesai
+        const el = marker.getElement();
+        if (el) el.style.cursor = "grab";
+        // Panggil callback via ref agar selalu up-to-date
+        onDragRef.current?.(lat, lng);
+      });
     }
-  }, [pickedPos]);
+
+    pickMarkerRef.current = marker;
+
+    // Cleanup: hapus event listener dan marker saat efek dijalankan ulang
+    return () => {
+      marker.off();
+      map.removeLayer(marker);
+    };
+  // draggable masuk deps agar marker direcreate jika prop berubah
+  }, [pickedPos, draggable]);
 
   return (
     <div

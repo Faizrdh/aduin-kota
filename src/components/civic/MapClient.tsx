@@ -34,7 +34,7 @@ export function MapClient(props: ComponentProps<typeof CivicMap>) {
         />
       }
     >
-      {/* Semua props termasuk flyTo diteruskan langsung ke CivicMap */}
+      {/* Semua props — termasuk draggable, onDrag, flyTo — diteruskan langsung */}
       <CivicMap {...props} />
     </Suspense>
   );
