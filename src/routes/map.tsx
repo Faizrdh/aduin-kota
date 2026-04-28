@@ -1,11 +1,11 @@
 /*eslint-disable*/
 
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState, useEffect, useCallback, useRef } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Filter, Plus, X, MapPin, Search, Layers,
-  Loader2, AlertTriangle, RefreshCw, WifiOff,
+  Loader2, WifiOff, RefreshCw, Flame,
 } from "lucide-react";
 import { MapClient } from "@/components/civic/MapClient";
 import { CATEGORIES, STATUSES, type Category, type Status, type Report } from "@/data/reports";
@@ -37,8 +37,9 @@ interface ApiReport {
   description: string;
   category:    DbCategory;
   status:      DbStatus;
-  lat:         number | null;
-  lng:         number | null;
+  // FIX: lat & lng adalah Float non-nullable di schema Prisma
+  lat:         number;
+  lng:         number;
   province:    string;
   city:        string;
   district:    string;
@@ -73,10 +74,8 @@ const PLACEHOLDER_IMG =
 
 // ─── Converter ────────────────────────────────────────────────────────────────
 
-function apiToReport(r: ApiReport): Report | null {
-  // Lewati laporan tanpa koordinat — tidak bisa ditampilkan di peta
-  if (r.lat === null || r.lng === null) return null;
-
+// FIX: lat & lng selalu ada (non-nullable), tidak perlu return null
+function apiToReport(r: ApiReport): Report {
   return {
     id:          `RPT-${r.id.slice(-4).toUpperCase()}`,
     title:       r.title,
@@ -97,7 +96,7 @@ function apiToReport(r: ApiReport): Report | null {
   };
 }
 
-// ─── timeAgo ─────────────────────────────────────────────────────────────────
+// ─── timeAgo ──────────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
@@ -108,7 +107,7 @@ function timeAgo(iso: string) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-// ─── Hook: Fetch all map reports ──────────────────────────────────────────────
+// ─── Hook: Fetch all map reports ───────────────────────────────────────────────
 
 function useMapReports() {
   const [reports,   setReports]   = useState<Report[]>([]);
@@ -116,11 +115,10 @@ function useMapReports() {
   const [error,     setError]     = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
 
-  const fetch = useCallback(async () => {
+  const fetchReports = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      // Ambil semua laporan dengan limit besar — peta tidak pakai pagination
       const params = new URLSearchParams({ page: "1", limit: "500" });
       const res    = await authFetch(`/api/reports/all?${params}`);
 
@@ -133,9 +131,8 @@ function useMapReports() {
       }
 
       const json: { data: ApiReport[] } = await res.json();
-      const mapped = (json.data ?? [])
-        .map(apiToReport)
-        .filter((r): r is Report => r !== null);
+      // FIX: tidak perlu .filter() null karena apiToReport selalu return Report
+      const mapped = (json.data ?? []).map(apiToReport);
 
       setReports(mapped);
       setLastFetch(new Date());
@@ -146,37 +143,35 @@ function useMapReports() {
     }
   }, []);
 
-  // Auto-refresh setiap 60 detik
   useEffect(() => {
-    fetch();
-    const id = setInterval(fetch, 60_000);
+    fetchReports();
+    const id = setInterval(fetchReports, 60_000);
     return () => clearInterval(id);
-  }, [fetch]);
+  }, [fetchReports]);
 
-  return { reports, loading, error, refetch: fetch, lastFetch };
+  return { reports, loading, error, refetch: fetchReports, lastFetch };
 }
 
-// ─── MapPage ──────────────────────────────────────────────────────────────────
+// ─── MapPage ───────────────────────────────────────────────────────────────────
 
 function MapPage() {
   const { reports, loading, error, refetch, lastFetch } = useMapReports();
 
-  const [activeCats, setActiveCats] = useState<Category[]>(
-    Object.keys(CATEGORIES) as Category[]
-  );
-  const [activeStat, setActiveStat] = useState<Status | "all">("all");
-  const [search,     setSearch]     = useState("");
-  const [selected,   setSelected]   = useState<Report | null>(null);
+  const [activeCats,     setActiveCats]     = useState<Category[]>(Object.keys(CATEGORIES) as Category[]);
+  const [activeStat,     setActiveStat]     = useState<Status | "all">("all");
+  const [search,         setSearch]         = useState("");
+  const [selected,       setSelected]       = useState<Report | null>(null);
   const [showMobileCats, setShowMobileCats] = useState(false);
+  const [showHeatmap,    setShowHeatmap]    = useState(false);
 
-  // Saat reports berubah, update selected jika ada yang match
+  // Update selected saat reports berubah
   useEffect(() => {
     if (!selected) return;
     const updated = reports.find(
       (r) => r.id === selected.id || (r.lat === selected.lat && r.lng === selected.lng)
     );
     if (updated) setSelected(updated);
-  }, [reports]);
+  }, [reports]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
     return reports.filter(
@@ -207,7 +202,12 @@ function MapPage() {
 
       {/* ── Peta ── */}
       <div className="absolute inset-0 p-2 md:p-3">
-        <MapClient reports={filtered} onSelect={setSelected} height="100%" />
+        <MapClient
+          reports={filtered}
+          onSelect={setSelected}
+          height="100%"
+          showHeatmap={showHeatmap}
+        />
       </div>
 
       {/* ── Loading overlay ── */}
@@ -294,8 +294,23 @@ function MapPage() {
           ))}
         </div>
 
-        {/* Counter + refresh */}
+        {/* Counter + heatmap toggle + refresh */}
         <div className="ml-auto flex items-center gap-2 pointer-events-auto">
+
+          {/* Heatmap toggle */}
+          <button
+            onClick={() => setShowHeatmap((p) => !p)}
+            title="Toggle heatmap kepadatan masalah"
+            className={`h-8 px-3 rounded-xl glass-strong flex items-center gap-1.5 shadow-elevated text-xs font-medium transition-smooth ${
+              showHeatmap
+                ? "text-orange-300 bg-orange-500/20 border border-orange-500/40"
+                : "text-muted-foreground hover:text-foreground border border-transparent"
+            }`}
+          >
+            <Flame size={13} className={showHeatmap ? "text-orange-400" : ""} />
+            <span className="hidden sm:inline">Heatmap</span>
+          </button>
+
           {lastFetch && (
             <button
               onClick={refetch}
@@ -305,6 +320,7 @@ function MapPage() {
               <RefreshCw size={13} />
             </button>
           )}
+
           <div className="glass-strong rounded-2xl px-3 py-2 flex items-center gap-2 shadow-elevated text-xs">
             <Layers size={13} className="text-accent" />
             <span className="font-medium">{filtered.length}</span>
@@ -339,7 +355,18 @@ function MapPage() {
           ))}
         </div>
 
-        {/* Mobile category toggle */}
+        {/* Mobile: heatmap toggle */}
+        <button
+          onClick={() => setShowHeatmap((p) => !p)}
+          className={`glass-strong rounded-2xl px-3 py-2 flex items-center gap-1.5 shadow-elevated text-[11px] font-medium shrink-0 ${
+            showHeatmap ? "text-orange-300 bg-orange-500/20 border border-orange-500/40" : ""
+          }`}
+        >
+          <Flame size={12} className={showHeatmap ? "text-orange-400" : "text-accent"} />
+          Heatmap
+        </button>
+
+        {/* Mobile: category toggle */}
         <button
           onClick={() => setShowMobileCats((p) => !p)}
           className="glass-strong rounded-2xl px-3 py-2 flex items-center gap-1.5 shadow-elevated text-[11px] font-medium shrink-0"
@@ -348,6 +375,49 @@ function MapPage() {
           Kategori
         </button>
       </div>
+
+      {/* ── Heatmap legend ── */}
+      <AnimatePresence>
+        {showHeatmap && (
+          <motion.div
+            key="heatmap-legend"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="absolute bottom-20 left-4 z-[400] glass-strong rounded-2xl px-4 py-3 shadow-elevated pointer-events-none hidden md:block"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              Kepadatan Masalah
+            </p>
+            <div className="flex items-center gap-2">
+              <div
+                className="h-2.5 w-32 rounded-full"
+                style={{
+                  background: "linear-gradient(to right, #00ff00, #ffff00, #ff8800, #ff0000)",
+                }}
+              />
+            </div>
+            <div className="flex justify-between mt-1 text-[9px] text-muted-foreground">
+              <span>Rendah</span>
+              <span>Tinggi</span>
+            </div>
+            <div className="mt-2.5 space-y-1 text-[9px] text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0" />
+                <span>Baru (bobot 1.0)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-orange-400 shrink-0" />
+                <span>Dalam proses (0.7)</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-400 shrink-0" />
+                <span>Selesai / ditolak (0.2–0.1)</span>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Category filter — desktop left panel ── */}
       <div className="absolute top-24 left-4 glass-strong rounded-2xl p-3 z-[400] pointer-events-auto shadow-elevated w-52 hidden md:block">
@@ -379,8 +449,8 @@ function MapPage() {
                 <span
                   className="h-2.5 w-2.5 rounded-sm shrink-0"
                   style={{
-                    background:  cat.color,
-                    boxShadow:   active ? `0 0 8px ${cat.color}` : "none",
+                    background: cat.color,
+                    boxShadow:  active ? `0 0 8px ${cat.color}` : "none",
                   }}
                 />
                 <span className="flex-1 text-left text-[12px] leading-snug">{cat.label}</span>
@@ -392,7 +462,6 @@ function MapPage() {
           })}
         </div>
 
-        {/* Last updated */}
         {lastFetch && (
           <div className="mt-3 pt-3 border-t border-border/50 text-[10px] text-muted-foreground/60 text-center">
             Diperbarui {lastFetch.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
@@ -450,16 +519,14 @@ function MapPage() {
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 400, opacity: 0 }}
             transition={{ type: "spring", stiffness: 260, damping: 28 }}
-            className="absolute top-4 right-4 bottom-4 w-80 glass-strong rounded-3xl shadow-elevated overflow-hidden z-[400] flex flex-col hidden md:flex"
+            className="absolute top-4 right-4 bottom-4 w-80 glass-strong rounded-3xl shadow-elevated overflow-hidden z-[400] flex-col hidden md:flex"
           >
             <div className="relative h-44 shrink-0">
               <img
                 src={selected.image}
                 alt={selected.title}
                 className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = PLACEHOLDER_IMG;
-                }}
+                onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
               />
               <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
               <button
@@ -476,6 +543,7 @@ function MapPage() {
                 <StatusBadge status={selected.status} />
               </div>
             </div>
+
             <div className="p-5 flex-1 overflow-y-auto">
               <div className="text-[10px] text-muted-foreground tracking-wider uppercase font-mono">
                 {selected.id}
@@ -486,7 +554,6 @@ function MapPage() {
               <p className="text-sm text-muted-foreground mt-3 leading-relaxed">
                 {selected.description}
               </p>
-
               <div className="mt-5 space-y-3 text-sm">
                 <Row
                   icon={<MapPin size={13} />}
@@ -510,6 +577,7 @@ function MapPage() {
                 />
               </div>
             </div>
+
             <div className="p-4 border-t border-border flex gap-2 shrink-0">
               <button className="flex-1 px-3 py-2 rounded-xl glass text-xs font-medium hover:bg-white/10 transition-smooth">
                 Tugaskan
@@ -533,7 +601,6 @@ function MapPage() {
             transition={{ type: "spring", stiffness: 300, damping: 32 }}
             className="absolute bottom-0 left-0 right-0 glass-strong rounded-t-3xl shadow-elevated z-[400] flex flex-col md:hidden max-h-[55vh] overflow-hidden"
           >
-            {/* Drag handle */}
             <div className="flex justify-center pt-3 pb-1 shrink-0">
               <div className="h-1 w-10 rounded-full bg-white/20" />
             </div>
@@ -585,11 +652,12 @@ function MapPage() {
         to="/submit"
         className="absolute bottom-6 right-4 md:bottom-8 md:right-8 z-[450] h-12 md:h-14 px-5 md:px-6 rounded-full gradient-primary text-primary-foreground font-semibold shadow-glow hover:scale-105 transition-smooth flex items-center gap-2 animate-float text-sm md:text-base"
       >
-        <Plus size={16} /> <span className="hidden sm:inline">Buat Pengaduan</span>
+        <Plus size={16} />
+        <span className="hidden sm:inline">Buat Pengaduan</span>
         <span className="sm:hidden">Lapor</span>
       </Link>
 
-      {/* ── Empty state — no reports with coords ── */}
+      {/* ── Empty state ── */}
       {!loading && !error && reports.length > 0 && filtered.length === 0 && (
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[400] glass-strong rounded-2xl px-5 py-3 text-xs text-muted-foreground shadow-elevated whitespace-nowrap">
           Tidak ada laporan yang cocok dengan filter ini.
@@ -599,7 +667,7 @@ function MapPage() {
   );
 }
 
-// ─── Row helper ───────────────────────────────────────────────────────────────
+// ─── Row helper ────────────────────────────────────────────────────────────────
 
 function Row({
   icon,
