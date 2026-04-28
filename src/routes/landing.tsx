@@ -669,7 +669,7 @@ function LandingPage() {
             <Link to="/login"
               className="w-full flex items-center justify-center gap-2 py-3 rounded-xl gradient-primary text-primary-foreground text-sm font-semibold shadow-glow hover:scale-[1.02] transition-smooth"
             >
-              <Plus size={15} /> Buat Pengaduan Sekarang
+              <Plus size={15} /> Laporkan Masalah di Sekitarmu Sekarang
             </Link>
             <p className="text-[10px] text-muted-foreground text-center mt-3">Login diperlukan untuk mengajukan laporan</p>
           </div>
@@ -719,7 +719,7 @@ function LandingPage() {
                 </p>
                 <Link to="/login" onClick={() => setHeroOpen(false)}
                   className="w-full flex items-center justify-center gap-2 py-3 rounded-xl gradient-primary text-primary-foreground text-sm font-semibold shadow-glow hover:scale-[1.02] transition-smooth">
-                  <Plus size={15} /> Buat Pengaduan Sekarang
+                  <Plus size={15} /> Laporkan Masalah di Sekitarmu Sekarang
                 </Link>
                 <p className="text-[10px] text-muted-foreground text-center mt-3 pb-1">Login diperlukan untuk mengajukan laporan</p>
               </motion.div>
@@ -1241,7 +1241,7 @@ function LandingPage() {
               </div>
               <div>
                 <div className="font-display font-bold text-sm">AduinKota</div>
-                <div className="text-[10px] text-muted-foreground">Platform Pengaduan Warga</div>
+                <div className="text-[10px] text-muted-foreground">Aduin Keluhanmu Disini</div>
               </div>
             </div>
             <p className="text-xs text-muted-foreground text-center">

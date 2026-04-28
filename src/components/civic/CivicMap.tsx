@@ -5,6 +5,7 @@ import L from "leaflet";
 import "leaflet.markercluster";
 import { CATEGORIES, STATUSES, type Report, type Category, type Status, timeAgo } from "@/data/reports";
 import { authFetch } from "@/data/login";
+import type { NearbyReport } from "@/hooks/Usenearbyreports";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,24 +16,31 @@ type FlyToTarget = {
 };
 
 type Props = {
-  reports:        Report[];
-  height?:        string;
-  onSelect?:      (r: Report) => void;
-  pickMode?:      boolean;
-  onPick?:        (lat: number, lng: number) => void;
-  onDrag?:        (lat: number, lng: number) => void;
-  pickedPos?:     { lat: number; lng: number } | null;
-  draggable?:     boolean;
-  initialCenter?: [number, number];
-  initialZoom?:   number;
-  flyTo?:         FlyToTarget | null;
-  showHeatmap?:   boolean;
+  reports:         Report[];
+  height?:         string;
+  onSelect?:       (r: Report) => void;
+  pickMode?:       boolean;
+  onPick?:         (lat: number, lng: number) => void;
+  onDrag?:         (lat: number, lng: number) => void;
+  pickedPos?:      { lat: number; lng: number } | null;
+  draggable?:      boolean;
+  initialCenter?:  [number, number];
+  initialZoom?:    number;
+  flyTo?:          FlyToTarget | null;
+  showHeatmap?:    boolean;
   /**
    * Path API untuk fetch data heatmap.
    * Default: /api/reports/heatmap  (butuh admin auth)
    * Landing page publik: /api/reports/heatmap/public  (tanpa auth)
    */
   heatmapApiPath?: string;
+  /**
+   * Laporan terdekat yang ditampilkan sebagai amber marker di layer terpisah
+   * (tidak ikut cluster utama) — untuk fitur duplicate detection.
+   */
+  nearbyReports?:  NearbyReport[];
+  /** Callback saat user klik marker nearby — untuk mengarahkan ke modal */
+  onNearbySelect?: (r: NearbyReport) => void;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -51,6 +59,33 @@ const HEAT_GRADIENT: Record<number, string> = {
   0.7: "#ff8800",
   1.0: "#ff0000",
 };
+
+// Amber palette for nearby-duplicate markers
+const NEARBY_COLOR  = "#F59E0B";
+const NEARBY_RING   = "#F59E0B44";
+const NEARBY_GLOW   = "#F59E0B99";
+
+// ─── CSS injection for nearby pulse animation ─────────────────────────────────
+// Injected once so Leaflet divIcon HTML can reference the keyframe class.
+
+let _nearbyStyleInjected = false;
+
+function injectNearbyStyle() {
+  if (_nearbyStyleInjected || typeof document === "undefined") return;
+  _nearbyStyleInjected = true;
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes nearbyPulse {
+      0%   { box-shadow: 0 0 0 0   ${NEARBY_RING}, 0 0 12px ${NEARBY_GLOW}; }
+      50%  { box-shadow: 0 0 0 10px transparent,   0 0 22px ${NEARBY_GLOW}; }
+      100% { box-shadow: 0 0 0 0   ${NEARBY_RING}, 0 0 12px ${NEARBY_GLOW}; }
+    }
+    .nearby-pin {
+      animation: nearbyPulse 2s ease-in-out infinite;
+    }
+  `;
+  document.head.appendChild(style);
+}
 
 // ─── leaflet.heat dynamic loader ──────────────────────────────────────────────
 let _heatPromise: Promise<void> | null = null;
@@ -103,15 +138,42 @@ function makePickIcon(isDraggable: boolean) {
   });
 }
 
+/**
+ * Amber pulsing marker for nearby-duplicate reports.
+ * Slightly smaller than regular markers to visually signal "reference, not your pin".
+ */
+function makeNearbyIcon() {
+  return L.divIcon({
+    className:   "civic-marker",
+    html: `<div class="pin nearby-pin" style="
+      background:${NEARBY_COLOR};
+      --marker-glow:${NEARBY_GLOW};
+      width:22px;height:22px;border-radius:50% 50% 50% 0;
+      transform:rotate(-45deg);
+      border:2.5px solid rgba(255,255,255,0.5);
+    "></div>`,
+    iconSize:    [22, 22],
+    iconAnchor:  [11, 20],
+    popupAnchor: [0, -22],
+  });
+}
+
 function getStatusHex(s: Status) {
   return s === "new" ? "#82C8E5" : s === "progress" ? "#E5C100" : "#5BCF8C";
 }
 
+// ─── Nearby status label map ──────────────────────────────────────────────────
+
+const NEARBY_STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  PENDING:     { label: "Menunggu",        color: "#E5C100" },
+  IN_REVIEW:   { label: "Sedang Ditinjau", color: "#82C8E5" },
+  IN_PROGRESS: { label: "Diproses",        color: "#82C8E5" },
+  RESOLVED:    { label: "Selesai",         color: "#5BCF8C" },
+  REJECTED:    { label: "Ditolak",         color: "#E03A3A" },
+};
+
 // ─── Hook: fetch heatmap data dari backend ────────────────────────────────────
-//
-// Menerima `apiPath` sehingga bisa digunakan baik dengan endpoint admin
-// maupun endpoint publik (/api/reports/heatmap/public) untuk landing page.
-//
+
 function useHeatmapData(
   enabled:     boolean,
   mapMoveTick: number,
@@ -120,7 +182,6 @@ function useHeatmapData(
 ): [number, number, number][] {
   const [points, setPoints] = useState<[number, number, number][]>([]);
 
-  // Stable refs agar tidak trigger re-render
   const getMapRef  = useRef(getMap);
   const apiPathRef = useRef(apiPath);
   useEffect(() => { getMapRef.current  = getMap;   }, [getMap]);
@@ -144,8 +205,6 @@ function useHeatmapData(
           neLng: b.getEast().toFixed(6),
         });
 
-        // Gunakan fetch biasa untuk endpoint publik,
-        // authFetch untuk endpoint yang butuh auth (admin dashboard).
         const isPublic = apiPathRef.current.includes("/public");
         const res      = isPublic
           ? await fetch(`${apiPathRef.current}?${params}`)
@@ -187,27 +246,32 @@ export function CivicMap({
   initialZoom     = 11,
   flyTo           = null,
   showHeatmap     = false,
-  heatmapApiPath  = "/api/reports/heatmap",  // default: admin endpoint
+  heatmapApiPath  = "/api/reports/heatmap",
+  nearbyReports   = [],
+  onNearbySelect,
 }: Props) {
-  const containerRef  = useRef<HTMLDivElement>(null);
-  const mapRef        = useRef<L.Map | null>(null);
-  const clusterRef    = useRef<L.MarkerClusterGroup | null>(null);
-  const heatLayerRef  = useRef<L.Layer | null>(null);
-  const pickMarkerRef = useRef<L.Marker | null>(null);
+  const containerRef   = useRef<HTMLDivElement>(null);
+  const mapRef         = useRef<L.Map | null>(null);
+  const clusterRef     = useRef<L.MarkerClusterGroup | null>(null);
+  const nearbyLayerRef = useRef<L.LayerGroup | null>(null);   // ← NEW: separate layer
+  const heatLayerRef   = useRef<L.Layer | null>(null);
+  const pickMarkerRef  = useRef<L.Marker | null>(null);
 
   const [mounted,      setMounted]      = useState(false);
   const [mapReady,     setMapReady]     = useState(false);
   const [heatReady,    setHeatReady]    = useState(false);
   const [mapMoveTick,  setMapMoveTick]  = useState(0);
 
-  const onDragRef = useRef(onDrag);
-  const onPickRef = useRef(onPick);
-  useEffect(() => { onDragRef.current = onDrag; }, [onDrag]);
-  useEffect(() => { onPickRef.current = onPick; }, [onPick]);
+  const onDragRef          = useRef(onDrag);
+  const onPickRef          = useRef(onPick);
+  const onNearbySelectRef  = useRef(onNearbySelect);
+  useEffect(() => { onDragRef.current         = onDrag;         }, [onDrag]);
+  useEffect(() => { onPickRef.current         = onPick;         }, [onPick]);
+  useEffect(() => { onNearbySelectRef.current = onNearbySelect; }, [onNearbySelect]);
 
   const getMap = useCallback(() => mapRef.current, []);
 
-  useEffect(() => setMounted(true), []);
+  useEffect(() => { setMounted(true); }, []);
 
   // ── Load heat plugin async ─────────────────────────────────────────────────
   useEffect(() => {
@@ -219,6 +283,8 @@ export function CivicMap({
   // ── Init peta (hanya sekali) ───────────────────────────────────────────────
   useEffect(() => {
     if (!mounted || !containerRef.current || mapRef.current) return;
+
+    injectNearbyStyle(); // ensure pulse keyframe is available
 
     const map = L.map(containerRef.current, {
       center:             initialCenter,
@@ -251,7 +317,10 @@ export function CivicMap({
     clusterRef.current = cluster;
     map.addLayer(cluster);
 
-    // Increment tick setiap peta selesai bergerak/zoom → trigger re-fetch heatmap
+    // ── Nearby layer — NOT clustered, always visible individually ─────────
+    const nearbyLayer = L.layerGroup().addTo(map);
+    nearbyLayerRef.current = nearbyLayer;
+
     const onMoveEnd = () => setMapMoveTick(t => t + 1);
     map.on("moveend", onMoveEnd);
     map.on("zoomend", onMoveEnd);
@@ -262,9 +331,10 @@ export function CivicMap({
       map.off("moveend", onMoveEnd);
       map.off("zoomend", onMoveEnd);
       map.remove();
-      mapRef.current       = null;
-      clusterRef.current   = null;
-      heatLayerRef.current = null;
+      mapRef.current        = null;
+      clusterRef.current    = null;
+      nearbyLayerRef.current = null;
+      heatLayerRef.current  = null;
       setMapReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -312,6 +382,53 @@ export function CivicMap({
     });
   }, [reports, onSelect]);
 
+  // ── Nearby markers — amber pulsing, on a separate non-clustered layer ──────
+  useEffect(() => {
+    const layer = nearbyLayerRef.current;
+    if (!layer) return;
+
+    layer.clearLayers();
+    if (!nearbyReports?.length) return;
+
+    nearbyReports.forEach((r) => {
+      const statusInfo  = NEARBY_STATUS_LABEL[r.status] ?? { label: r.status, color: "#9aa6b5" };
+      const supporterCount = r._count.joins + 1;
+      const imgHtml = r.imageUrl
+        ? `<div style="position:relative;height:100px;overflow:hidden;border-radius:10px 10px 0 0">
+             <img src="${r.imageUrl}" style="width:100%;height:100%;object-fit:cover" />
+             <div style="position:absolute;inset:0;background:linear-gradient(180deg,transparent 30%,rgba(0,0,0,0.65))"></div>
+           </div>`
+        : `<div style="height:6px;background:${NEARBY_COLOR};border-radius:10px 10px 0 0"></div>`;
+
+      const m = L.marker([r.lat, r.lng], { icon: makeNearbyIcon() });
+
+      m.bindPopup(
+        `<div style="padding:0;width:240px;font-family:Inter,sans-serif;border-radius:14px;overflow:hidden">
+          ${imgHtml}
+          <div style="padding:10px 12px 12px;background:#0f172a">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <span style="background:${NEARBY_COLOR}22;color:${NEARBY_COLOR};font-size:9px;font-weight:700;padding:2px 7px;border-radius:999px;border:1px solid ${NEARBY_COLOR}44;letter-spacing:0.05em">
+                ⚠ LAPORAN SERUPA
+              </span>
+            </div>
+            <div style="font-weight:600;font-size:12px;margin-bottom:3px;color:#f1f5f9;line-height:1.35">${r.title}</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
+              <span style="font-size:10px;color:${NEARBY_COLOR};font-weight:600">📍 ${r.distanceMeters}m dari titik Anda</span>
+              <span style="font-size:10px;font-weight:600;color:${statusInfo.color}">● ${statusInfo.label}</span>
+            </div>
+            <div style="margin-top:5px;font-size:10px;color:#94a3b8">
+              👥 ${supporterCount} pelapor
+            </div>
+          </div>
+        </div>`,
+        { closeButton: true, autoPan: true, maxWidth: 250 }
+      );
+
+      m.on("click", () => onNearbySelectRef.current?.(r));
+      layer.addLayer(m);
+    });
+  }, [nearbyReports]);
+
   // ── Pick mode ──────────────────────────────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
@@ -346,7 +463,7 @@ export function CivicMap({
     return () => { marker.off(); map.removeLayer(marker); };
   }, [pickedPos, draggable]);
 
-  // ── Heatmap data — re-fetch saat enabled, mapReady, heatReady, atau peta bergerak ──
+  // ── Heatmap data ───────────────────────────────────────────────────────────
   const heatPoints = useHeatmapData(
     showHeatmap && mapReady && heatReady,
     mapMoveTick,

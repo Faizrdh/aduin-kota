@@ -7,10 +7,11 @@ import ReactDOM from "react-dom";
 import {
   Search, Loader2, AlertTriangle, FileX, Inbox,
   ChevronDown, X, CheckCircle2, Clock, CircleDot,
-  Ban, RefreshCw, Filter, MoreHorizontal,
+  Ban, RefreshCw, Filter, MoreHorizontal, Bot,
 } from "lucide-react";
 import { authFetch } from "@/data/login";
 import { CategoryBadge, StatusBadge } from "@/components/civic/StatusBadge";
+import { AIBadgeAdmin, DINAS_LABELS, DINAS_CONFIG } from "@/components/civic/AIBadge";
 
 export const Route = createFileRoute("/incoming-reports")({
   head: () => ({
@@ -27,13 +28,25 @@ type DbStatus   = "PENDING" | "IN_REVIEW" | "IN_PROGRESS" | "RESOLVED" | "REJECT
 type DbCategory = "WASTE" | "INFRA" | "DISTURB" | "LAND";
 
 interface ApiReport {
-  id: string; title: string; description: string;
-  category: DbCategory; status: DbStatus;
-  province: string; city: string; district: string; village: string;
-  address: string | null; imageUrl: string | null;
-  createdAt: string; updatedAt: string;
-  user: { id: string; name: string; avatar: string | null };
-  _count: { joins: number };
+  id:               string;
+  title:            string;
+  description:      string;
+  category:         DbCategory;
+  status:           DbStatus;
+  province:         string;
+  city:             string;
+  district:         string;
+  village:          string;
+  address:          string | null;
+  imageUrl:         string | null;
+  createdAt:        string;
+  updatedAt:        string;
+  user:             { id: string; name: string; avatar: string | null };
+  _count:           { joins: number };
+  // ── AI Smart Routing ──
+  ai_label?:         string | null;
+  confidence_score?: number | null;
+  ai_overridden?:    boolean;
 }
 
 interface ApiMeta { total: number; page: number; limit: number; totalPages: number; }
@@ -85,8 +98,48 @@ function timeAgo(iso: string) {
 function toShortId(id: string) { return `RPT-${id.slice(-4).toUpperCase()}`; }
 function toTitle(s: string)    { return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); }
 
-// ─── Status Dropdown — menggunakan React Portal ───────────────────────────────
-// Portal memastikan dropdown di-render di luar semua overflow:hidden
+// ─── Admin AI Cell — badge + override dropdown per baris ──────────────────────
+function AdminAICell({ report }: { report: ApiReport }) {
+  const [label, setLabel] = useState(report.ai_label ?? null);
+  return (
+    <AIBadgeAdmin
+      label={label}
+      score={report.confidence_score ?? null}
+      overridden={report.ai_overridden ?? false}
+      reportId={report.id}
+      size="sm"
+      showScore
+      onOverride={newLabel => setLabel(newLabel)}
+    />
+  );
+}
+
+// ─── Filter Dinas AI ──────────────────────────────────────────────────────────
+function DinasFilter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="appearance-none pl-7 pr-7 py-1.5 rounded-lg border border-border text-xs font-medium transition-smooth focus:border-accent outline-none"
+        style={{
+          backgroundColor: "rgba(15,23,42,0.85)",
+          color: value ? "rgb(226,232,240)" : "rgb(100,116,139)",
+        }}
+      >
+        <option value="">Semua Dinas</option>
+        {DINAS_LABELS.map(lbl => {
+          const cfg = DINAS_CONFIG[lbl];
+          return <option key={lbl} value={lbl} style={{ backgroundColor: "#0f172a" }}>{cfg?.emoji} {lbl}</option>;
+        })}
+      </select>
+      <Bot size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-accent pointer-events-none" />
+      <ChevronDown size={10} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+    </div>
+  );
+}
+
+// ─── Status Dropdown dengan React Portal ──────────────────────────────────────
 function StatusDropdown({ reportId, currentStatus, onUpdated }: {
   reportId: string; currentStatus: DbStatus;
   onUpdated: (id: string, status: DbStatus) => void;
@@ -94,16 +147,13 @@ function StatusDropdown({ reportId, currentStatus, onUpdated }: {
   const [open,    setOpen]    = useState(false);
   const [loading, setLoading] = useState(false);
   const [note,    setNote]    = useState("");
-  // Posisi dropdown dihitung dari bounding rect tombol
   const [pos,     setPos]     = useState({ top: 0, left: 0, width: 0 });
   const btnRef = useRef<HTMLButtonElement>(null);
 
-  // Tutup saat klik di luar
   useEffect(() => {
     if (!open) return;
     function onDown(e: MouseEvent) {
       const target = e.target as Node;
-      // Abaikan klik di dalam portal (id="status-portal")
       const portal = document.getElementById("status-portal");
       if (portal?.contains(target)) return;
       if (btnRef.current?.contains(target)) return;
@@ -113,7 +163,6 @@ function StatusDropdown({ reportId, currentStatus, onUpdated }: {
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  // Tutup saat scroll
   useEffect(() => {
     if (!open) return;
     const onScroll = () => setOpen(false);
@@ -123,78 +172,48 @@ function StatusDropdown({ reportId, currentStatus, onUpdated }: {
 
   function handleToggle() {
     if (!btnRef.current) return;
-    const rect = btnRef.current.getBoundingClientRect();
-    // Hitung apakah ada cukup ruang di bawah, kalau tidak buka ke atas
+    const rect       = btnRef.current.getBoundingClientRect();
     const spaceBelow = window.innerHeight - rect.bottom;
-    const dropH      = 240; // estimasi tinggi dropdown
-    const top        = spaceBelow >= dropH
-      ? rect.bottom + 6                  // buka ke bawah
-      : rect.top - dropH - 6;            // buka ke atas
+    const dropH      = 240;
+    const top        = spaceBelow >= dropH ? rect.bottom + 6 : rect.top - dropH - 6;
     setPos({ top, left: rect.left, width: rect.width });
     setOpen(p => !p);
   }
 
   async function handleSelect(newStatus: DbStatus) {
     if (newStatus === currentStatus) { setOpen(false); return; }
-    setLoading(true);
-    setOpen(false);
+    setLoading(true); setOpen(false);
     try {
       const res = await authFetch(`/api/reports/${reportId}/status`, {
-        method:  "PATCH",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ status: newStatus, note }),
+        body: JSON.stringify({ status: newStatus, note }),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        alert(body?.error ?? "Gagal mengubah status.");
-        return;
-      }
+      if (!res.ok) { const body = await res.json().catch(() => ({})); alert(body?.error ?? "Gagal mengubah status."); return; }
       onUpdated(reportId, newStatus);
       setNote("");
-    } catch {
-      alert("Tidak dapat terhubung ke server.");
-    } finally {
-      setLoading(false);
-    }
+    } catch { alert("Tidak dapat terhubung ke server."); }
+    finally  { setLoading(false); }
   }
 
   const current = STATUS_OPTIONS.find(o => o.value === currentStatus);
 
   const dropdown = open ? ReactDOM.createPortal(
-    <div
-      id="status-portal"
-      style={{
-        position: "fixed",
-        top:      pos.top,
-        left:     pos.left,
-        minWidth: Math.max(pos.width, 210),
-        zIndex:   9999,
-      }}
-      className="glass-strong border border-border rounded-xl shadow-lg overflow-hidden"
-    >
-      {/* Catatan admin */}
+    <div id="status-portal" style={{ position: "fixed", top: pos.top, left: pos.left, minWidth: Math.max(pos.width, 210), zIndex: 9999 }}
+      className="glass-strong border border-border rounded-xl shadow-lg overflow-hidden">
       <div className="p-2 border-b border-border/50">
-        <input
-          value={note}
-          onChange={e => setNote(e.target.value)}
-          placeholder="Catatan admin (opsional)…"
+        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Catatan admin (opsional)…"
           className="w-full bg-transparent text-[11px] text-muted-foreground placeholder:text-muted-foreground/50 outline-none px-1"
-          onClick={e => e.stopPropagation()}
-        />
+          onClick={e => e.stopPropagation()} />
       </div>
       {STATUS_OPTIONS.map(opt => (
-        <button
-          key={opt.value}
-          onClick={() => handleSelect(opt.value)}
+        <button key={opt.value} onClick={() => handleSelect(opt.value)}
           className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-xs font-medium transition-smooth hover:bg-white/10 ${
             opt.value === currentStatus ? "text-accent bg-accent/10" : "text-foreground"
-          }`}
-        >
+          }`}>
           {opt.icon}
           <span className="flex-1 text-left">{opt.label}</span>
-          {opt.value === currentStatus && (
-            <span className="text-[10px] opacity-50 bg-accent/20 px-1.5 py-0.5 rounded-full">aktif</span>
-          )}
+          {opt.value === currentStatus && <span className="text-[10px] opacity-50 bg-accent/20 px-1.5 py-0.5 rounded-full">aktif</span>}
         </button>
       ))}
     </div>,
@@ -203,12 +222,8 @@ function StatusDropdown({ reportId, currentStatus, onUpdated }: {
 
   return (
     <>
-      <button
-        ref={btnRef}
-        onClick={handleToggle}
-        disabled={loading}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium glass hover:bg-white/10 transition-smooth border border-border/50 min-w-[130px] justify-between"
-      >
+      <button ref={btnRef} onClick={handleToggle} disabled={loading}
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium glass hover:bg-white/10 transition-smooth border border-border/50 min-w-[130px] justify-between">
         <span className="flex items-center gap-1.5">
           {loading ? <Loader2 size={12} className="animate-spin" /> : current?.icon}
           <span>{current?.label ?? currentStatus}</span>
@@ -242,6 +257,7 @@ function IncomingReports() {
   const [statsLoad,  setStatsLoad]  = useState(true);
   const [error,      setError]      = useState<string | null>(null);
   const [filter,     setFilter]     = useState<FilterStatus>("all");
+  const [dinasFilter,setDinasFilter]= useState("");   // ← filter dinas AI baru
   const [q,          setQ]          = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
   const [page,       setPage]       = useState(1);
@@ -251,7 +267,7 @@ function IncomingReports() {
     return () => clearTimeout(t);
   }, [q]);
 
-  useEffect(() => { setPage(1); }, [filter]);
+  useEffect(() => { setPage(1); }, [filter, dinasFilter]);
 
   const fetchStats = useCallback(async () => {
     setStatsLoad(true);
@@ -267,6 +283,7 @@ function IncomingReports() {
       const params = new URLSearchParams({ page: String(page), limit: "15" });
       if (filter !== "all") params.set("status", filter);
       if (debouncedQ)       params.set("search", debouncedQ);
+      if (dinasFilter)      params.set("ai_label", dinasFilter); // ← filter dinas
 
       const res = await authFetch(`/api/reports/all?${params}`);
       if (res.status === 401) { setError("Sesi habis. Silakan login kembali."); return; }
@@ -281,7 +298,7 @@ function IncomingReports() {
       setMeta(json.meta);
     } catch { setError("Tidak dapat terhubung ke server."); }
     finally  { setLoading(false); }
-  }, [filter, debouncedQ, page]);
+  }, [filter, debouncedQ, dinasFilter, page]);
 
   useEffect(() => { fetchStats();   }, [fetchStats]);
   useEffect(() => { fetchReports(); }, [fetchReports]);
@@ -303,10 +320,8 @@ function IncomingReports() {
           <h1 className="font-display text-3xl md:text-4xl font-bold text-gradient">Laporan Masuk</h1>
           <p className="text-muted-foreground mt-2 text-sm">Kelola & perbarui status semua laporan dari masyarakat.</p>
         </div>
-        <button
-          onClick={() => { fetchReports(); fetchStats(); }}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl glass text-xs font-medium text-muted-foreground hover:text-foreground transition-smooth border border-border/50"
-        >
+        <button onClick={() => { fetchReports(); fetchStats(); }}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl glass text-xs font-medium text-muted-foreground hover:text-foreground transition-smooth border border-border/50">
           <RefreshCw size={13} />Refresh
         </button>
       </header>
@@ -314,21 +329,24 @@ function IncomingReports() {
       {/* Stat Cards */}
       {!statsLoad && stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
-          <StatCard label="Total Laporan"  value={stats.total}      icon={<Inbox        size={18} className="text-primary-foreground" />} color="gradient-primary"   />
-          <StatCard label="Baru / Pending" value={stats.pending}    icon={<CircleDot    size={18} className="text-amber-300"          />} color="bg-amber-500/15"    />
-          <StatCard label="Dalam Proses"   value={stats.inProgress} icon={<Clock        size={18} className="text-blue-300"           />} color="bg-blue-500/15"     />
-          <StatCard label="Selesai"        value={stats.resolved}   icon={<CheckCircle2 size={18} className="text-emerald-300"        />} color="bg-emerald-500/15"  />
+          <StatCard label="Total Laporan"  value={stats.total}      icon={<Inbox        size={18} className="text-primary-foreground" />} color="gradient-primary"  />
+          <StatCard label="Baru / Pending" value={stats.pending}    icon={<CircleDot    size={18} className="text-amber-300"          />} color="bg-amber-500/15"   />
+          <StatCard label="Dalam Proses"   value={stats.inProgress} icon={<Clock        size={18} className="text-blue-300"           />} color="bg-blue-500/15"    />
+          <StatCard label="Selesai"        value={stats.resolved}   icon={<CheckCircle2 size={18} className="text-emerald-300"        />} color="bg-emerald-500/15" />
         </div>
       )}
 
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-3 mb-5">
+        {/* Search */}
         <div className="glass rounded-xl px-3.5 py-2 flex items-center gap-2 flex-1 max-w-sm">
           <Search size={14} className="text-muted-foreground shrink-0" />
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Cari laporan, kota…"
             className="bg-transparent outline-none text-sm w-full placeholder:text-muted-foreground/60" />
           {q && <button onClick={() => setQ("")} className="text-muted-foreground hover:text-foreground"><X size={13} /></button>}
         </div>
+
+        {/* Filter Status */}
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Filter size={12} /><span>Filter:</span></div>
         <div className="glass rounded-xl p-1 flex items-center gap-1 overflow-x-auto scrollbar-none">
           {FILTER_TABS.map(({ key, label }) => (
@@ -340,18 +358,36 @@ function IncomingReports() {
             </button>
           ))}
         </div>
+
+        {/* ── Filter Dinas AI ── */}
+        <DinasFilter value={dinasFilter} onChange={setDinasFilter} />
+        {dinasFilter && (
+          <button onClick={() => setDinasFilter("")}
+            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-smooth">
+            <X size={10} /> Reset dinas
+          </button>
+        )}
       </div>
 
-      {/* Tabel — hapus overflow-hidden, pakai overflow-visible agar dropdown tidak terpotong */}
+      {/* Tabel */}
       <div className="glass rounded-2xl shadow-soft overflow-visible">
 
-        {/* Header kolom */}
-        <div className="hidden md:grid grid-cols-[72px_2.4fr_1.2fr_1.1fr_1.3fr_90px_160px_40px] gap-3 px-5 py-3 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border rounded-t-2xl">
-          <div>Foto</div><div>Laporan</div><div>Kategori</div><div>Status</div>
-          <div>Lokasi</div><div>Masuk</div><div>Ubah Status</div><div />
+        {/* ── Header kolom desktop ── */}
+        {/* PERUBAHAN: tambah kolom "Dinas AI" setelah Status */}
+        <div className="hidden md:grid grid-cols-[72px_2.2fr_1.1fr_1fr_1.1fr_1.2fr_85px_155px_36px] gap-3 px-5 py-3 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border rounded-t-2xl">
+          <div>Foto</div>
+          <div>Laporan</div>
+          <div>Kategori</div>
+          <div>Status</div>
+          <div className="flex items-center gap-1"><Bot size={10} /><span>Dinas AI</span></div>
+          <div>Lokasi</div>
+          <div>Masuk</div>
+          <div>Ubah Status</div>
+          <div />
         </div>
 
         <div className="divide-y divide-border">
+
           {loading && (
             <div className="p-14 flex flex-col items-center justify-center gap-3 text-muted-foreground">
               <Loader2 size={24} className="animate-spin text-accent" />
@@ -383,7 +419,7 @@ function IncomingReports() {
             const status = STATUS_DISPLAY[r.status]     ?? { label: r.status,   variant: "new" };
             return (
               <div key={r.id}
-                className="grid grid-cols-[64px_1fr_auto] md:grid-cols-[72px_2.4fr_1.2fr_1.1fr_1.3fr_90px_160px_40px] gap-3 px-5 py-4 hover:bg-white/[0.03] transition-smooth items-center"
+                className="grid grid-cols-[64px_1fr_auto] md:grid-cols-[72px_2.2fr_1.1fr_1fr_1.1fr_1.2fr_85px_155px_36px] gap-3 px-5 py-4 hover:bg-white/[0.03] transition-smooth items-center"
               >
                 <img src={r.imageUrl ?? PLACEHOLDER_IMG} alt="" loading="lazy"
                   onError={e => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
@@ -394,14 +430,21 @@ function IncomingReports() {
                     {toShortId(r.id)}<span className="ml-2 opacity-60">· {r.user?.name ?? "—"}</span>
                   </div>
                   <div className="text-sm font-medium truncate mt-0.5">{r.title}</div>
+                  {/* Mobile: badges */}
                   <div className="md:hidden flex flex-wrap gap-1.5 mt-1.5">
                     <CategoryBadge category={cat.color} label={cat.label} />
                     <StatusBadge   status={status.variant as any} />
+                    <AdminAICell   report={r} />
                   </div>
                 </div>
 
                 <div className="hidden md:block"><CategoryBadge category={cat.color} label={cat.label} /></div>
                 <div className="hidden md:block"><StatusBadge   status={status.variant as any} /></div>
+
+                {/* ── DINAS AI dengan override — desktop ── */}
+                <div className="hidden md:block">
+                  <AdminAICell report={r} />
+                </div>
 
                 <div className="hidden md:block text-xs text-muted-foreground truncate leading-snug">
                   <div>{toTitle(r.village)}</div>
@@ -412,7 +455,6 @@ function IncomingReports() {
                   {timeAgo(r.createdAt)}
                 </div>
 
-                {/* Dropdown dengan React Portal — tidak terpotong overflow */}
                 <div className="hidden md:flex items-center">
                   <StatusDropdown reportId={r.id} currentStatus={r.status} onUpdated={handleStatusUpdated} />
                 </div>

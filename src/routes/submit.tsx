@@ -6,11 +6,16 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronRight, ChevronLeft, Check, MapPin, Upload,
   Crosshair, Trash2, Construction, AlertTriangle, MapPinned,
-  Loader2, Users, X, Info,
+  Loader2, Users, X, Info, AlertCircle, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { MapClient } from "@/components/civic/MapClient";
 import { CATEGORIES, type Category } from "@/data/reports";
-import { authFetch } from "@/data/login"; // ← IMPORT authFetch
+import { authFetch } from "@/data/login";
+import {
+  useNearbyReports,
+  joinReport,
+  type NearbyReport,
+} from "@/hooks/Usenearbyreports";
 
 export const Route = createFileRoute("/submit")({
   head: () => ({
@@ -31,19 +36,6 @@ const API_BASE         = "/api/reports";
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Region      { id: string; name: string }
 interface FlyToTarget { center: [number, number]; zoom: number; seq: number }
-
-interface NearbyReport {
-  id:             string;
-  title:          string;
-  description:    string;
-  category:       string;
-  status:         string;
-  distanceMeters: number;
-  imageUrl:       string | null;
-  createdAt:      string;
-  user:           { id: string; name: string; avatar: string | null };
-  _count:         { joins: number };
-}
 
 const ICONS = { Trash2, Construction, AlertTriangle, MapPinned };
 
@@ -203,6 +195,9 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   REJECTED:    { label: "Ditolak",         color: "text-red-400"    },
 };
 
+// ─── Nearby strip constants ───────────────────────────────────────────────────
+const NEARBY_AMBER = "#F59E0B";
+
 // ─── Component Utama ──────────────────────────────────────────────────────────
 function SubmitPage() {
   const navigate = useNavigate();
@@ -246,13 +241,30 @@ function SubmitPage() {
   const [imgPreview, setImgPreview] = useState<string | null>(null);
   const [submitted,  setSubmitted]  = useState(false);
 
-  const [nearbyReports, setNearbyReports] = useState<NearbyReport[]>([]);
-  const [showDupModal,  setShowDupModal]  = useState(false);
-  const [checkingDup,   setCheckingDup]   = useState(false);
-  const [submittingNew, setSubmittingNew] = useState(false);
-  const [joiningId,     setJoiningId]     = useState<string | null>(null);
-  const [joinedSuccess, setJoinedSuccess] = useState(false);
-  const [submitError,   setSubmitError]   = useState<string | null>(null);
+  // ── Nearby duplicate detection via hook ────────────────────────────────────
+  // Reactive: fires whenever pos or category changes (with debounce).
+  // Only enabled when user is on step 1+ and has picked a location.
+  const {
+    reports:  nearbyReports,
+    loading:  nearbyLoading,
+    refetch:  nearbyRefetch,
+    clear:    nearbyClean,
+  } = useNearbyReports({
+    lat:      pos?.lat ?? null,
+    lng:      pos?.lng ?? null,
+    category,
+    radius:   100,
+    enabled:  step >= 1 && pos !== null && category !== null,
+    debounceMs: 700,
+  });
+
+  // UI state for nearby UI panels
+  const [nearbyExpanded,  setNearbyExpanded]  = useState(false);
+  const [showDupModal,    setShowDupModal]    = useState(false);
+  const [submittingNew,   setSubmittingNew]   = useState(false);
+  const [joiningId,       setJoiningId]       = useState<string | null>(null);
+  const [joinedSuccess,   setJoinedSuccess]   = useState(false);
+  const [submitError,     setSubmitError]     = useState<string | null>(null);
 
   const steps = ["Category", "Location", "Details"];
 
@@ -265,6 +277,11 @@ function SubmitPage() {
     flyToSeq.current += 1;
     setFlyTo({ center, zoom, seq: flyToSeq.current });
   }, []);
+
+  // Reset nearby expanded state when location changes
+  useEffect(() => {
+    setNearbyExpanded(false);
+  }, [pos, category]);
 
   useEffect(() => {
     setLoadingProv(true);
@@ -443,31 +460,18 @@ function SubmitPage() {
     reader.readAsDataURL(file);
   };
 
-  // ─── Duplicate Detection ──────────────────────────────────────────────────
+  // ─── Submit flow (uses hook refetch for freshness) ────────────────────────
   const checkDuplicatesAndSubmit = async () => {
     if (!pos || !category) return;
-    setCheckingDup(true);
     setSubmitError(null);
 
-    try {
-      const catUpper = category.toUpperCase();
-      // GET /nearby tidak butuh auth → pakai authFetch tetap aman (kirim token kalau ada)
-      const url = `${API_BASE}/nearby?lat=${pos.lat}&lng=${pos.lng}&radius=100&category=${catUpper}`;
-      const res  = await authFetch(url); // ← authFetch otomatis kirim Bearer token
-      const json = await res.json();
-      const found: NearbyReport[] = json.data ?? [];
+    // Refetch without debounce — ensures we have the most current data at submit time.
+    await nearbyRefetch();
 
-      if (found.length > 0) {
-        setNearbyReports(found);
-        setShowDupModal(true);
-      } else {
-        await doSubmitNew();
-      }
-    } catch (err) {
-      console.error("Duplicate check error:", err);
+    if (nearbyReports.length > 0) {
+      setShowDupModal(true);
+    } else {
       await doSubmitNew();
-    } finally {
-      setCheckingDup(false);
     }
   };
 
@@ -491,7 +495,6 @@ function SubmitPage() {
         imageUrl:    imgPreview || undefined,
       };
 
-      // ↓ authFetch otomatis tambahkan "Authorization: Bearer <token>"
       const res = await authFetch(API_BASE, {
         method: "POST",
         body:   JSON.stringify(body),
@@ -516,17 +519,7 @@ function SubmitPage() {
     setJoiningId(reportId);
     setSubmitError(null);
     try {
-      // ↓ authFetch otomatis tambahkan "Authorization: Bearer <token>"
-      const res = await authFetch(`${API_BASE}/${reportId}/join`, {
-        method: "POST",
-        body:   JSON.stringify({}),
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err?.error ?? `HTTP ${res.status}`);
-      }
-
+      await joinReport(reportId);
       setJoinedSuccess(true);
       setTimeout(() => navigate({ to: "/my-reports" }), 1800);
     } catch (err: any) {
@@ -535,6 +528,13 @@ function SubmitPage() {
       setJoiningId(null);
     }
   };
+
+  // Whether user is in a loading state during final submit check
+  const isSubmitting = submittingNew;
+
+  // ─── Nearby strip — shown below map in step 1 ────────────────────────────
+  const hasNearby     = nearbyReports.length > 0;
+  const nearbyCount   = nearbyReports.length;
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
@@ -626,6 +626,7 @@ function SubmitPage() {
             {/* ── STEP 1 — Location ── */}
             {step === 1 && (
               <div className="grid lg:grid-cols-2 gap-6">
+                {/* Left: Map + GPS + Nearby strip */}
                 <div>
                   <h2 className="font-display text-xl font-semibold mb-1">Dimana lokasi pengaduan?</h2>
                   <p className="text-sm text-muted-foreground mb-4">
@@ -643,13 +644,52 @@ function SubmitPage() {
                         </motion.div>
                       )}
                     </AnimatePresence>
+
+                    {/* Nearby detection badge — overlaid top-left on map */}
+                    <AnimatePresence>
+                      {(nearbyLoading || hasNearby) && !loadingRev && (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.85 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.85 }}
+                          transition={{ type: "spring", stiffness: 400, damping: 28 }}
+                          className="absolute top-2 left-2 z-10"
+                        >
+                          {nearbyLoading ? (
+                            <div className="flex items-center gap-1.5 rounded-xl bg-background/80 backdrop-blur-sm border border-amber-500/30 px-2.5 py-1.5 text-xs text-amber-400">
+                              <Loader2 size={11} className="animate-spin" />
+                              Memeriksa laporan serupa…
+                            </div>
+                          ) : hasNearby ? (
+                            <button
+                              onClick={() => setNearbyExpanded((p) => !p)}
+                              className="flex items-center gap-1.5 rounded-xl bg-amber-500/20 backdrop-blur-sm border border-amber-500/40 px-2.5 py-1.5 text-xs font-semibold text-amber-400 hover:bg-amber-500/30 transition-smooth"
+                            >
+                              <AlertCircle size={11} />
+                              {nearbyCount} laporan serupa ditemukan
+                              {nearbyExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                            </button>
+                          ) : null}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
                     <MapClient
-                      reports={[]} pickMode onPick={handleManualPick}
-                      pickedPos={pos} initialCenter={[-6.2088, 106.8200]}
-                      initialZoom={11} flyTo={flyTo} height="100%"
+                      reports={[]}
+                      pickMode
+                      onPick={handleManualPick}
+                      pickedPos={pos}
+                      initialCenter={[-6.2088, 106.8200]}
+                      initialZoom={11}
+                      flyTo={flyTo}
+                      height="100%"
+                      nearbyReports={nearbyReports}
+                      onNearbySelect={(r) => {
+                        // Clicking a nearby map marker opens the full modal
+                        setShowDupModal(true);
+                      }}
                     />
                   </div>
 
+                  {/* GPS + coords row */}
                   <div className="flex flex-wrap items-center gap-3 mt-3">
                     <button onClick={handleGPS} disabled={loadingRev}
                       className="px-3 py-2 rounded-xl glass text-xs font-medium hover:bg-white/10 transition-smooth flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -672,6 +712,75 @@ function SubmitPage() {
                     </p>
                   )}
 
+                  {/* ── Live Nearby Reports panel ── */}
+                  <AnimatePresence>
+                    {nearbyExpanded && hasNearby && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                        animate={{ opacity: 1, height: "auto", marginTop: 12 }}
+                        exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                        transition={{ duration: 0.28, ease: "easeInOut" }}
+                        className="overflow-hidden"
+                      >
+                        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.06] p-4">
+                          <div className="flex items-center gap-2 mb-3">
+                            <AlertCircle size={14} className="text-amber-400 shrink-0" />
+                            <span className="text-xs font-semibold text-amber-300">
+                              {nearbyCount} laporan serupa ditemukan dalam radius 100m
+                            </span>
+                          </div>
+
+                          <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
+                            {nearbyReports.map((r) => {
+                              const statusInfo = STATUS_LABEL[r.status] ?? { label: r.status, color: "text-muted-foreground" };
+                              const supporters = r._count.joins + 1;
+                              return (
+                                <div key={r.id}
+                                  className="rounded-xl border border-white/[0.08] bg-white/[0.04] p-3 flex gap-3 items-start"
+                                >
+                                  {r.imageUrl && (
+                                    <img src={r.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0 border border-border" />
+                                  )}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-semibold text-xs truncate mb-0.5">{r.title}</div>
+                                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-1.5">
+                                      <span className="flex items-center gap-1">
+                                        <MapPin size={9} style={{ color: NEARBY_AMBER }} /> {r.distanceMeters}m
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        <Users size={9} /> {supporters} pelapor
+                                      </span>
+                                      <span className={`font-semibold ${statusInfo.color}`}>● {statusInfo.label}</span>
+                                    </div>
+                                    <button
+                                      onClick={() => handleJoinReport(r.id)}
+                                      disabled={joiningId !== null}
+                                      className="w-full py-1.5 rounded-lg border text-[10px] font-semibold flex items-center justify-center gap-1.5 transition-smooth disabled:opacity-50"
+                                      style={{
+                                        background: `${NEARBY_AMBER}18`,
+                                        borderColor: `${NEARBY_AMBER}44`,
+                                        color: NEARBY_AMBER,
+                                      }}
+                                    >
+                                      {joiningId === r.id
+                                        ? <><Loader2 size={10} className="animate-spin" /> Bergabung…</>
+                                        : <><Users size={10} /> Ikut Laporan Ini</>
+                                      }
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <p className="text-[10px] text-muted-foreground mt-3 leading-relaxed">
+                            Dengan ikut ke laporan yang sudah ada, suara Anda akan memperkuat prioritas penanganan.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
                   {debugInfo && (
                     <div className="mt-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 px-3 py-2 text-[10px] text-yellow-300 font-mono whitespace-pre-wrap leading-relaxed">
                       <span className="font-bold text-yellow-400">Debug: </span>{debugInfo}
@@ -679,6 +788,7 @@ function SubmitPage() {
                   )}
                 </div>
 
+                {/* Right: Region selects */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="font-semibold text-sm">Silahkan pilih region administratif</h3>
@@ -719,6 +829,27 @@ function SubmitPage() {
                       className="w-full bg-white/5 border border-border rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-accent transition-smooth resize-none placeholder:text-muted-foreground/60"
                     />
                   </Field>
+
+                  {/* Amber warning card — shown inside right panel when nearby found */}
+                  <AnimatePresence>
+                    {hasNearby && !nearbyLoading && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 6 }}
+                        className="rounded-xl border px-3.5 py-3 flex items-start gap-2.5"
+                        style={{ background: `${NEARBY_AMBER}0d`, borderColor: `${NEARBY_AMBER}33` }}
+                      >
+                        <AlertCircle size={14} style={{ color: NEARBY_AMBER }} className="shrink-0 mt-0.5" />
+                        <div>
+                          <p className="text-xs font-semibold" style={{ color: NEARBY_AMBER }}>
+                            {nearbyCount} laporan serupa ada di sini
+                          </p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                            Bergabunglah agar lebih cepat ditangani, daripada membuat laporan baru.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               </div>
             )}
@@ -743,13 +874,31 @@ function SubmitPage() {
                     />
                   </Field>
 
-                  <div className="rounded-xl bg-blue-500/10 border border-blue-500/20 px-3.5 py-3 flex items-start gap-2.5">
-                    <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
-                    <p className="text-xs text-blue-300 leading-relaxed">
-                      Sebelum laporan dikirim, sistem akan memeriksa apakah sudah ada laporan serupa
-                      dalam radius <strong>100 meter</strong> dari lokasi Anda.
-                    </p>
-                  </div>
+                  {/* Nearby pre-warning — shown before final submit */}
+                  {hasNearby ? (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                      className="rounded-xl border px-3.5 py-3 flex items-start gap-2.5"
+                      style={{ background: `${NEARBY_AMBER}0d`, borderColor: `${NEARBY_AMBER}40` }}
+                    >
+                      <AlertCircle size={14} style={{ color: NEARBY_AMBER }} className="shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                        <p className="text-xs font-semibold leading-snug" style={{ color: NEARBY_AMBER }}>
+                          ⚠ {nearbyCount} laporan serupa sudah ada dalam radius 100m
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                          Saat Anda menekan "Ajukan", sistem akan menampilkan pilihan untuk bergabung ke laporan yang sudah ada.
+                        </p>
+                      </div>
+                    </motion.div>
+                  ) : (
+                    <div className="rounded-xl bg-blue-500/10 border border-blue-500/20 px-3.5 py-3 flex items-start gap-2.5">
+                      <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
+                      <p className="text-xs text-blue-300 leading-relaxed">
+                        Sebelum laporan dikirim, sistem akan memeriksa apakah sudah ada laporan serupa
+                        dalam radius <strong>100 meter</strong> dari lokasi Anda.
+                      </p>
+                    </div>
+                  )}
 
                   {province && (
                     <div className="rounded-xl bg-white/[0.04] border border-border px-3.5 py-3">
@@ -811,7 +960,7 @@ function SubmitPage() {
               </div>
             )}
 
-            {/* ── Navigasi ── */}
+            {/* ── Navigation ── */}
             <div className="flex justify-between mt-8 pt-6 border-t border-border">
               <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0}
                 className="px-4 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:text-foreground transition-smooth flex items-center gap-1.5 disabled:opacity-30 disabled:cursor-not-allowed"
@@ -828,11 +977,11 @@ function SubmitPage() {
               ) : (
                 <button
                   onClick={checkDuplicatesAndSubmit}
-                  disabled={!canNext || checkingDup || submittingNew}
+                  disabled={!canNext || isSubmitting}
                   className="px-6 py-2.5 rounded-xl gradient-primary text-primary-foreground text-sm font-semibold shadow-glow hover:scale-[1.02] transition-smooth flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:hover:scale-100"
                 >
-                  {checkingDup || submittingNew
-                    ? <><Loader2 size={15} className="animate-spin" /> {checkingDup ? "Memeriksa duplikat…" : "Mengirim…"}</>
+                  {isSubmitting
+                    ? <><Loader2 size={15} className="animate-spin" /> Mengirim…</>
                     : <><Check size={15} /> Ajukan Laporan</>
                   }
                 </button>
@@ -854,7 +1003,7 @@ function SubmitPage() {
         )}
       </AnimatePresence>
 
-      {/* ── Modal Duplicate Detection ── */}
+      {/* ── Modal Duplicate Detection ─────────────────────────────────────────── */}
       <AnimatePresence>
         {showDupModal && (
           <motion.div
@@ -866,7 +1015,7 @@ function SubmitPage() {
               animate={{ scale: 1,   opacity: 1, y: 0  }}
               exit={{    scale: 0.9, opacity: 0, y: 20 }}
               transition={{ type: "spring", stiffness: 300, damping: 25 }}
-              className="glass rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-yellow-500/30 relative"
+              className="glass rounded-3xl p-6 max-w-lg w-full shadow-2xl border border-amber-500/30 relative"
             >
               <button onClick={() => setShowDupModal(false)}
                 className="absolute top-4 right-4 h-8 w-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-smooth">
@@ -883,15 +1032,18 @@ function SubmitPage() {
                 </div>
               ) : (
                 <>
+                  {/* Header */}
                   <div className="flex items-start gap-3 mb-5 pr-8">
-                    <div className="h-10 w-10 rounded-xl bg-yellow-500/20 border border-yellow-500/30 flex items-center justify-center shrink-0">
-                      <AlertTriangle size={19} className="text-yellow-400" />
+                    <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
+                      style={{ background: `${NEARBY_AMBER}22`, border: `1px solid ${NEARBY_AMBER}44` }}>
+                      <AlertCircle size={19} style={{ color: NEARBY_AMBER }} />
                     </div>
                     <div>
                       <h3 className="font-display text-lg font-bold leading-tight">Laporan Serupa Ditemukan</h3>
                       <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
-                        Terdapat <strong className="text-foreground">{nearbyReports.length} laporan</strong> dalam
-                        radius 100m di kategori yang sama.
+                        Ada <strong className="text-foreground">{nearbyReports.length} laporan</strong> dalam
+                        radius 100m dengan kategori yang sama.
+                        Ikut bergabung agar lebih cepat ditangani!
                       </p>
                     </div>
                   </div>
@@ -902,9 +1054,11 @@ function SubmitPage() {
                     </div>
                   )}
 
+                  {/* Nearby report cards */}
                   <div className="space-y-3 mb-5 max-h-64 overflow-y-auto pr-1 -mr-1">
                     {nearbyReports.map((r) => {
                       const statusInfo = STATUS_LABEL[r.status] ?? { label: r.status, color: "text-muted-foreground" };
+                      const supporters = r._count.joins + 1;
                       return (
                         <div key={r.id} className="rounded-2xl border border-border bg-white/[0.04] hover:bg-white/[0.06] p-4 transition-smooth">
                           <div className="flex items-start justify-between gap-3">
@@ -914,8 +1068,10 @@ function SubmitPage() {
                                 <span className={`text-[10px] font-medium shrink-0 ${statusInfo.color}`}>● {statusInfo.label}</span>
                               </div>
                               <div className="flex items-center gap-3 text-[11px] text-muted-foreground mb-2">
-                                <span className="flex items-center gap-1"><MapPin size={9} className="text-accent" />{r.distanceMeters}m dari titik Anda</span>
-                                <span className="flex items-center gap-1"><Users size={9} />{r._count.joins + 1} pelapor</span>
+                                <span className="flex items-center gap-1">
+                                  <MapPin size={9} style={{ color: NEARBY_AMBER }} />{r.distanceMeters}m dari titik Anda
+                                </span>
+                                <span className="flex items-center gap-1"><Users size={9} />{supporters} pelapor</span>
                               </div>
                               <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{r.description}</p>
                             </div>
@@ -924,7 +1080,12 @@ function SubmitPage() {
                           <button
                             onClick={() => handleJoinReport(r.id)}
                             disabled={joiningId !== null}
-                            className="mt-3 w-full py-2 rounded-xl bg-accent/15 border border-accent/30 text-accent text-xs font-semibold hover:bg-accent/25 transition-smooth flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="mt-3 w-full py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-smooth disabled:opacity-50 disabled:cursor-not-allowed"
+                            style={{
+                              background: `${NEARBY_AMBER}1a`,
+                              border: `1px solid ${NEARBY_AMBER}44`,
+                              color: NEARBY_AMBER,
+                            }}
                           >
                             {joiningId === r.id
                               ? <><Loader2 size={12} className="animate-spin" /> Bergabung…</>
@@ -936,6 +1097,7 @@ function SubmitPage() {
                     })}
                   </div>
 
+                  {/* Footer actions */}
                   <div className="flex gap-3 pt-4 border-t border-border">
                     <button onClick={() => setShowDupModal(false)} disabled={submittingNew || joiningId !== null}
                       className="flex-1 px-4 py-2.5 rounded-xl glass text-sm font-medium hover:bg-white/10 transition-smooth disabled:opacity-50">
