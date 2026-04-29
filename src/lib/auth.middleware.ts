@@ -70,9 +70,6 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
         res.status(401).json({ error: "User tidak ditemukan." });
         return;
       }
-      // Jika field 'role' belum ada di schema Prisma,
-      // semua user dianggap admin sementara (dev mode).
-      // Setelah menambah field role, hapus kondisi !("role" in user).
       const isAdmin =
         !("role" in user) || (user as any).role === "ADMIN";
 
@@ -84,5 +81,5 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
       req.userRole = (user as any).role ?? "ADMIN";
       next();
     })
-    .catch(next); // lempar ke Express error handler
+    .catch(next); 
 }

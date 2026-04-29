@@ -1,4 +1,5 @@
 /*eslint-disable*/
+// src/routes/map.tsx
 
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, useEffect, useCallback, useRef, useOptimistic, useTransition } from "react";
@@ -14,9 +15,6 @@ import { AIBadge } from "@/components/civic/AIBadge";
 import { authFetch } from "@/data/login";
 
 // ─── Route Definition ─────────────────────────────────────────────────────────
-// validateSearch memastikan query params di-parse dengan aman dan type-safe.
-// Jika params tidak ada atau tidak valid, hasilnya undefined (bukan error).
-
 export const Route = createFileRoute("/map")({
   validateSearch: (search: Record<string, unknown>) => ({
     id:  typeof search.id === "string"                    ? search.id           : undefined,
@@ -68,6 +66,10 @@ const STATUS_MAP: Record<DbStatus, Status> = {
   PENDING: "new", IN_REVIEW: "progress", IN_PROGRESS: "progress",
   RESOLVED: "resolved", REJECTED: "cancelled",
 };
+
+// ─── Status yang DISEMBUNYIKAN dari peta (kasus sudah selesai/ditolak) ────────
+// BUG FIX #1: Laporan dengan status ini tidak boleh muncul sebagai pin di peta.
+const HIDDEN_STATUSES: Status[] = ["resolved", "cancelled"];
 
 const PLACEHOLDER_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%231e293b'/%3E%3Ctext x='32' y='36' text-anchor='middle' fill='%2364748b' font-size='10' font-family='sans-serif'%3ENo img%3C/text%3E%3C/svg%3E";
 
@@ -144,23 +146,8 @@ function useMapReports() {
     return () => clearInterval(id);
   }, [fetchReports]);
 
-  // Cari ApiReport berdasarkan short id (RPT-XXXX)
   const getRaw = useCallback((shortId: string): ApiReport | undefined => {
     return rawMapRef.current.get(shortId);
-  }, []);
-
-  // Cari ApiReport berdasarkan DB id (cuid) — digunakan untuk deep-link matching
-  const getRawByDbId = useCallback((dbId: string): { report: Report; raw: ApiReport } | undefined => {
-    for (const [shortId, raw] of rawMapRef.current.entries()) {
-      if (raw.id === dbId) {
-        const report = Array.from(rawMapRef.current.entries())
-          .find(([k]) => k === shortId);
-        if (!report) return undefined;
-        // Temukan Report yang sesuai dari state
-        return undefined; // handled di bawah dengan cara berbeda
-      }
-    }
-    return undefined;
   }, []);
 
   return { reports, loading, error, refetch: fetchReports, lastFetch, getRaw };
@@ -252,62 +239,34 @@ function MapPage() {
   const [showMobileCats, setShowMobileCats] = useState(false);
   const [showHeatmap,    setShowHeatmap]    = useState(false);
 
-  // ── Vote status untuk laporan yang sedang dipilih ─────────────────────────
   const [voteStatus,        setVoteStatus]        = useState<{ voted: boolean; count: number } | null>(null);
   const [voteStatusLoading, setVoteStatusLoading] = useState(false);
 
-  // ── Deep-link: baca query params dari URL ─────────────────────────────────
-  // Route.useSearch() sudah type-safe karena validateSearch di atas
   const { id: deepLinkId, lat: deepLinkLat, lng: deepLinkLng } = Route.useSearch();
   const navigate = useNavigate({ from: "/map" });
 
-  // State flyTo diteruskan ke MapClient → CivicMap untuk trigger map.flyTo()
   const [flyTo, setFlyTo] = useState<{ center: [number, number]; zoom: number; seq?: number } | null>(null);
-
-  // seq counter memastikan flyTo re-trigger meski koordinat sama
   const flySeqRef = useRef(0);
-
-  // Guard untuk mencegah efek deep-link dijalankan lebih dari sekali per id
   const deepLinkHandledRef = useRef<string | null>(null);
 
   // ── Efek deep-link ────────────────────────────────────────────────────────
-  // Dependency: deepLinkId, loading, reports
-  // - Menunggu loading selesai sebelum mencari laporan
-  // - Guard ref mencegah infinite loop saat reports di-poll setiap 60 detik
-  // - Jika deepLinkId berubah (user navigasi ke id baru), ref di-reset
   useEffect(() => {
-    // Jika tidak ada deep-link, reset guard dan keluar
     if (!deepLinkId) {
       deepLinkHandledRef.current = null;
       return;
     }
-
-    // Tunggu sampai fetch selesai agar reports tersedia
     if (loading) return;
-
-    // Sudah dihandle untuk id ini — skip agar tidak re-trigger setiap poll
     if (deepLinkHandledRef.current === deepLinkId) return;
 
-    // Cari laporan berdasarkan DB id (cuid) yang dikirim dari dashboard
-    // getRaw(shortId) mengembalikan ApiReport, lalu cocokkan raw.id dengan deepLinkId
     const targetReport = reports.find(r => getRaw(r.id)?.id === deepLinkId);
+    if (!targetReport) return;
 
-    if (!targetReport) {
-      // Laporan tidak ditemukan (mungkin belum ada di data, atau id salah)
-      // Tidak perlu error — cukup tidak buka sidebar
-      return;
-    }
-
-    // Tandai sebagai sudah dihandle
     deepLinkHandledRef.current = deepLinkId;
 
-    // Buka sidebar detail
     const raw = getRaw(targetReport.id);
     setSelected(targetReport);
     setSelectedRaw(raw ?? null);
 
-    // Tentukan koordinat: utamakan dari data yang di-fetch,
-    // fallback ke lat/lng di URL jika tersedia
     const lat = raw?.lat ?? deepLinkLat;
     const lng = raw?.lng ?? deepLinkLng;
 
@@ -318,7 +277,7 @@ function MapPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLinkId, loading, reports]);
 
-  // ── Fetch vote status saat laporan berbeda dipilih ────────────────────────
+  // ── Fetch vote status ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedRaw) { setVoteStatus(null); return; }
     setVoteStatusLoading(true);
@@ -333,7 +292,7 @@ function MapPage() {
       .finally(() => setVoteStatusLoading(false));
   }, [selectedRaw?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Sync selected saat reports di-refresh (poll 60s) ─────────────────────
+  // ── Sync selected saat reports di-refresh ────────────────────────────────
   useEffect(() => {
     if (!selected) return;
     const updated = reports.find(
@@ -345,9 +304,6 @@ function MapPage() {
     }
   }, [reports]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── handleSelect ──────────────────────────────────────────────────────────
-  // Saat panel ditutup: hapus query params dari URL (replace agar tidak
-  // menambah history entry baru) hanya jika memang ada deep-link aktif.
   function handleSelect(report: Report | null) {
     setSelected(report);
     if (!report) {
@@ -361,7 +317,13 @@ function MapPage() {
     setSelectedRaw(getRaw(report.id) ?? null);
   }
 
+  // ── BUG FIX #1: Sembunyikan pin laporan yang sudah SELESAI atau DITOLAK ───
+  // Laporan dengan status "resolved" (Selesai) atau "cancelled" (Ditolak)
+  // tidak boleh ditampilkan sebagai pin di peta — kasus sudah tertangani.
+  // Filter ini berjalan SEBELUM filter aktiveStat/kategori/pencarian sehingga
+  // laporan tersebut tidak bisa muncul meskipun user mengubah filter status.
   const filtered = useMemo(() => reports.filter(r =>
+    !HIDDEN_STATUSES.includes(r.status) &&           // ← FIX: sembunyikan resolved & cancelled
     activeCats.includes(r.category) &&
     (activeStat === "all" || r.status === activeStat) &&
     (search === "" ||
@@ -369,6 +331,11 @@ function MapPage() {
       r.region.city.toLowerCase().includes(search.toLowerCase()) ||
       r.region.subdistrict.toLowerCase().includes(search.toLowerCase()))
   ), [reports, activeCats, activeStat, search]);
+
+  // Hitung total laporan AKTIF (bukan resolved/cancelled) untuk badge
+  const activeReports = useMemo(() =>
+    reports.filter(r => !HIDDEN_STATUSES.includes(r.status)),
+  [reports]);
 
   const toggleCat = (c: Category) =>
     setActiveCats(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]);
@@ -380,7 +347,7 @@ function MapPage() {
   return (
     <main className="flex-1 relative h-[calc(100vh-0px)] md:h-screen overflow-hidden">
 
-      {/* ── Peta — flyTo diteruskan ke CivicMap melalui MapClient ── */}
+      {/* ── Peta ── */}
       <div className="absolute inset-0 p-2 md:p-3">
         <MapClient
           reports={filtered}
@@ -439,6 +406,7 @@ function MapPage() {
           )}
         </div>
 
+        {/* Status filter — hanya tampilkan status AKTIF (bukan resolved/cancelled) */}
         <div className="glass-strong rounded-2xl p-1.5 items-center gap-1 pointer-events-auto shadow-elevated hidden sm:flex flex-wrap">
           <button
             onClick={() => setActiveStat("all")}
@@ -448,17 +416,19 @@ function MapPage() {
           >
             All
           </button>
-          {(Object.keys(STATUSES) as Status[]).map(s => (
-            <button
-              key={s}
-              onClick={() => setActiveStat(s)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-smooth ${
-                activeStat === s ? "bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {STATUSES[s].label}
-            </button>
-          ))}
+          {(Object.keys(STATUSES) as Status[])
+            .filter(s => !HIDDEN_STATUSES.includes(s))  // ← sembunyikan tab resolved/cancelled
+            .map(s => (
+              <button
+                key={s}
+                onClick={() => setActiveStat(s)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-smooth ${
+                  activeStat === s ? "bg-white/10 text-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {STATUSES[s].label}
+              </button>
+            ))}
         </div>
 
         <div className="ml-auto flex items-center gap-2 pointer-events-auto">
@@ -482,10 +452,11 @@ function MapPage() {
               <RefreshCw size={13} />
             </button>
           )}
+          {/* Badge: tampilkan jumlah laporan AKTIF / total */}
           <div className="glass-strong rounded-2xl px-3 py-2 flex items-center gap-2 shadow-elevated text-xs">
             <Layers size={13} className="text-accent" />
             <span className="font-medium">{filtered.length}</span>
-            <span className="text-muted-foreground hidden sm:inline">/ {reports.length}</span>
+            <span className="text-muted-foreground hidden sm:inline">/ {activeReports.length}</span>
           </div>
         </div>
       </div>
@@ -501,17 +472,19 @@ function MapPage() {
           >
             Semua
           </button>
-          {(Object.keys(STATUSES) as Status[]).map(s => (
-            <button
-              key={s}
-              onClick={() => setActiveStat(s)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-smooth whitespace-nowrap ${
-                activeStat === s ? "bg-white/10 text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              {STATUSES[s].label}
-            </button>
-          ))}
+          {(Object.keys(STATUSES) as Status[])
+            .filter(s => !HIDDEN_STATUSES.includes(s))
+            .map(s => (
+              <button
+                key={s}
+                onClick={() => setActiveStat(s)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-smooth whitespace-nowrap ${
+                  activeStat === s ? "bg-white/10 text-foreground" : "text-muted-foreground"
+                }`}
+              >
+                {STATUSES[s].label}
+              </button>
+            ))}
         </div>
         <button
           onClick={() => setShowHeatmap(p => !p)}
@@ -538,7 +511,7 @@ function MapPage() {
             className="absolute bottom-20 left-4 z-[400] glass-strong rounded-2xl px-4 py-3 shadow-elevated pointer-events-none hidden md:block"
           >
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-              Kepadatan Masalah
+              Kepadatan Masalah Aktif
             </p>
             <div
               className="h-2.5 w-32 rounded-full"
@@ -569,7 +542,8 @@ function MapPage() {
           {(Object.keys(CATEGORIES) as Category[]).map(c => {
             const cat    = CATEGORIES[c];
             const active = activeCats.includes(c);
-            const count  = reports.filter(r => r.category === c).length;
+            // Hitung hanya laporan AKTIF per kategori
+            const count  = activeReports.filter(r => r.category === c).length;
             return (
               <button
                 key={c}
@@ -628,7 +602,7 @@ function MapPage() {
                   />
                   <span className="flex-1 text-left text-[12px]">{cat.label}</span>
                   <span className="text-[10px] text-muted-foreground">
-                    {reports.filter(r => r.category === c).length}
+                    {activeReports.filter(r => r.category === c).length}
                   </span>
                 </button>
               );
@@ -851,9 +825,9 @@ function MapPage() {
       </Link>
 
       {/* Empty state */}
-      {!loading && !error && reports.length > 0 && filtered.length === 0 && (
+      {!loading && !error && activeReports.length > 0 && filtered.length === 0 && (
         <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[400] glass-strong rounded-2xl px-5 py-3 text-xs text-muted-foreground shadow-elevated whitespace-nowrap">
-          Tidak ada laporan yang cocok dengan filter ini.
+          Tidak ada laporan aktif yang cocok dengan filter ini.
         </div>
       )}
     </main>

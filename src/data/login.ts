@@ -1,50 +1,38 @@
-/*eslint-disable*/
+/* eslint-disable */
 // src/data/login.ts
-// Menyimpan accessToken di memori (tidak di localStorage agar aman XSS)
-// Token otomatis di-refresh lewat cookie refresh token
+
+import {
+  getAccessToken,
+  setAccessToken,
+  clearAccessToken,
+  apiFetch,           // ← tambah ini
+} from "@/lib/apiFetch";
+
+// Re-export supaya komponen lain yang import dari sini tetap bisa pakai
+export { getAccessToken, setAccessToken, clearAccessToken };
+
+// ✅ Re-export authFetch sebagai alias apiFetch
+// → file lain yang import { authFetch } from "@/data/login" tidak perlu diubah
+export { apiFetch as authFetch };
 
 const API = "/api/auth";
 
-// ─── In-memory token store ────────────────────────────────────────────────────
-let _accessToken: string | null = null;
-
-export function getAccessToken(): string | null {
-  return _accessToken;
-}
-export function setAccessToken(token: string | null): void {
-  _accessToken = token;
-}
-
-// ─── Helper: fetch dengan Bearer token otomatis ───────────────────────────────
-// Gunakan ini di seluruh app untuk semua request yang butuh auth
-export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const token = getAccessToken();
-  return fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers ?? {}),
-    },
-    credentials: "include", // kirim cookie refresh token
-  });
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface AuthUser {
-  id:    string;
-  name:  string;
-  email: string;
-  role:  string;
-  city:  string;
+  id:      string;
+  name:    string;
+  email:   string;
+  role:    string;
+  city:    string;
+  avatar?: string;
 }
 
 // ─── authenticate (login) ─────────────────────────────────────────────────────
 export async function authenticate(email: string, password: string): Promise<AuthUser> {
   const res = await fetch(`${API}/login`, {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ email, password }),
+    method:      "POST",
+    headers:     { "Content-Type": "application/json" },
+    body:        JSON.stringify({ email, password }),
     credentials: "include",
   });
 
@@ -57,16 +45,16 @@ export async function authenticate(email: string, password: string): Promise<Aut
 
 // ─── register ─────────────────────────────────────────────────────────────────
 export async function register(
-  name: string,
-  email: string,
+  name:     string,
+  email:    string,
   password: string,
-  city: string,
+  city:     string,
 ): Promise<{ success: true; user: AuthUser } | { success: false; error: string }> {
   try {
     const res = await fetch(`${API}/register`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ name, email, password, city }),
+      method:      "POST",
+      headers:     { "Content-Type": "application/json" },
+      body:        JSON.stringify({ name, email, password, city }),
       credentials: "include",
     });
 
@@ -86,21 +74,25 @@ export async function logout(): Promise<void> {
     method:      "POST",
     credentials: "include",
   }).catch(() => {});
-  setAccessToken(null);
+  clearAccessToken();
 }
 
-// ─── refresh — panggil saat app pertama kali load ─────────────────────────────
+// ─── refreshSession — panggil saat app pertama kali load ─────────────────────
 export async function refreshSession(): Promise<AuthUser | null> {
   try {
     const res = await fetch(`${API}/refresh`, {
       method:      "POST",
       credentials: "include",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      clearAccessToken();
+      return null;
+    }
     const json = await res.json();
     setAccessToken(json.accessToken);
     return json.user as AuthUser;
   } catch {
+    clearAccessToken();
     return null;
   }
 }
