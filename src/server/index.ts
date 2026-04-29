@@ -5,7 +5,8 @@ import express      from "express";
 import cors         from "cors";
 import cookieParser from "cookie-parser";
 import { authRouter }   from "@/api/auth";
-import { reportsRouter } from "./reports";  // ← named import, konsisten dengan reports.ts
+import { reportsRouter } from "./reports";
+import { votesRouter }   from "./votes"; 
 import { optionalAuth }  from "@/lib/auth.middleware";
 
 const app  = express();
@@ -27,9 +28,8 @@ app.use((req, _res, next) => {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/auth",    authRouter);
-// optionalAuth di sini hanya untuk set req.userId jika ada token.
-// Tiap route di reportsRouter punya auth-nya sendiri (requireAuth / requireAdmin).
 app.use("/api/reports", optionalAuth, reportsRouter);
+app.use("/api/votes",   optionalAuth, votesRouter);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => res.json({ ok: true, timestamp: new Date().toISOString() }));

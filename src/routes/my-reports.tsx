@@ -222,7 +222,7 @@ function MyReports() {
           <div>Status</div>
           <div className="flex items-center gap-1">
             <span>🤖</span>
-            <span>Dinas AI</span>
+            <span>Diteruskan kepada dinas</span>
           </div>
           <div>Lokasi</div>
           <div>Dikirim</div>

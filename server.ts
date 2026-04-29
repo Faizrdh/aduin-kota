@@ -6,7 +6,8 @@ import express      from "express";
 import cors         from "cors";
 import cookieParser from "cookie-parser";
 import { authRouter }                  from "./src/api/auth";
-import { reportsRouter }               from "./src/server/reports"; // ← named export ✓
+import { reportsRouter }               from "./src/server/reports";
+import { votesRouter }                 from "./src/server/votes"; 
 import { optionalAuth }                from "./src/lib/auth.middleware";
 
 const app  = express();
@@ -23,6 +24,7 @@ app.use(cookieParser());
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use("/api/auth",    authRouter);
 app.use("/api/reports", optionalAuth, reportsRouter);
+app.use("/api/votes",   optionalAuth, votesRouter);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => res.json({ ok: true, timestamp: new Date().toISOString() }));

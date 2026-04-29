@@ -42,6 +42,7 @@ model User {
   refreshTokens RefreshToken[]
   reports       Report[]
   reportJoins   ReportJoin[]
+  votes         Vote[]
 
   @@map("users")
 }
@@ -65,6 +66,9 @@ model Report {
   description String
   category    ReportCategory
   status      ReportStatus   @default(PENDING)
+
+  voteCount Int    @default(0)
+  votes     Vote[]
 
   lat      Float
   lng      Float
@@ -93,20 +97,35 @@ model Report {
   @@index([status])
   @@index([userId])
   @@index([ai_label])
+  @@index([voteCount])
   @@map("reports")
 }
 
 model ReportJoin {
-  id       String @id @default(cuid())
-  reportId String
-  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  userId   String
-  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  note     String?
+  id        String   @id @default(cuid())
+  reportId  String
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  note      String?
   createdAt DateTime @default(now())
 
   @@unique([reportId, userId])
   @@index([reportId])
   @@index([userId])
   @@map("report_joins")
+}
+
+model Vote {
+  id        String   @id @default(cuid())
+  userId    String
+  reportId  String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, reportId])
+  @@index([reportId])
+  @@index([userId])
+  @@map("votes")
 }

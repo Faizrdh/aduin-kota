@@ -2,11 +2,12 @@
 // src/routes/index.tsx
 
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { motion } from "framer-motion";
-import { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useState, useEffect, useCallback, useOptimistic, useTransition } from "react";
 import {
   ArrowUpRight, Activity, Clock, CheckCircle2, AlertCircle,
   MapPin, Plus, TrendingUp, Loader2, AlertTriangle, RefreshCw,
+  ThumbsUp, ArrowDownUp, Flame,
 } from "lucide-react";
 import { authFetch } from "@/data/login";
 import { StatusBadge, CategoryBadge } from "@/components/civic/StatusBadge";
@@ -24,31 +25,33 @@ export const Route = createFileRoute("/")({
 // ─── Types ────────────────────────────────────────────────────────────────────
 type DbStatus   = "PENDING" | "IN_REVIEW" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
 type DbCategory = "WASTE" | "INFRA" | "DISTURB" | "LAND";
+type SortMode   = "terbaru" | "terpopuler";
 
 interface ApiReport {
-  id: string;
-  title: string;
+  id:          string;
+  title:       string;
   description: string;
-  category: DbCategory;
-  status: DbStatus;
-  province: string;
-  city: string;
-  district: string;
-  village: string;
-  address: string | null;
-  imageUrl: string | null;
-  createdAt: string;
-  updatedAt: string;
-  user: { id: string; name: string; avatar: string | null };
-  _count: { joins: number };
+  category:    DbCategory;
+  status:      DbStatus;
+  province:    string;
+  city:        string;
+  district:    string;
+  village:     string;
+  address:     string | null;
+  imageUrl:    string | null;
+  createdAt:   string;
+  updatedAt:   string;
+  user:        { id: string; name: string; avatar: string | null };
+  _count:      { joins: number };
+  voteCount:   number;
 }
 
 interface ApiStats {
-  total: number;
-  pending: number;
+  total:      number;
+  pending:    number;
   inProgress: number;
-  resolved: number;
-  rejected: number;
+  resolved:   number;
+  rejected:   number;
 }
 
 interface ApiReportsResponse {
@@ -94,9 +97,7 @@ function toTitle(s: string) {
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 function Skeleton({ className }: { className?: string }) {
-  return (
-    <div className={`animate-pulse rounded-lg bg-white/5 ${className ?? ""}`} />
-  );
+  return <div className={`animate-pulse rounded-lg bg-white/5 ${className ?? ""}`} />;
 }
 
 // ─── Stat Card ─────────────────────────────────────────────────────────────────
@@ -136,7 +137,6 @@ function CategoryBar({
   const cat = CATEGORY_DISPLAY[category];
   const pct = total > 0 ? Math.round((count / total) * 100) : 0;
 
-  // Map color string ke CSS var / tailwind color
   const colorMap: Record<string, string> = {
     red:   "var(--status-rejected, #ef4444)",
     blue:  "var(--status-progress, #3b82f6)",
@@ -166,23 +166,91 @@ function CategoryBar({
   );
 }
 
+// ─── MiniVoteButton ───────────────────────────────────────────────────────────
+interface MiniVoteButtonProps {
+  reportDbId:   string;
+  initialCount: number;
+}
+
+function MiniVoteButton({ reportDbId, initialCount }: MiniVoteButtonProps) {
+  const [committed, setCommitted]    = useState({ count: initialCount, voted: false });
+  const [isPending, startTransition] = useTransition();
+  const [optimistic, addOptimistic]  = useOptimistic(
+    committed,
+    (state, newVoted: boolean) => ({
+      voted: newVoted,
+      count: newVoted ? state.count + 1 : state.count - 1,
+    })
+  );
+
+  function handleVote(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const newVoted = !committed.voted;
+    startTransition(async () => {
+      addOptimistic(newVoted);
+      try {
+        const res = await authFetch(`/api/votes/toggle/${reportDbId}`, { method: "POST" });
+        if (res.ok) {
+          const data: { voted: boolean; voteCount: number } = await res.json();
+          setCommitted({ voted: data.voted, count: data.voteCount });
+        }
+      } catch {
+        // revert via committed state
+      }
+    });
+  }
+
+  return (
+    <button
+      onClick={handleVote}
+      disabled={isPending}
+      title={optimistic.voted ? "Batalkan dukungan" : "Dukung"}
+      className={[
+        "flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-all duration-150 shrink-0",
+        optimistic.voted
+          ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+          : "bg-white/5 text-muted-foreground hover:text-foreground hover:bg-white/10 border border-transparent",
+        isPending ? "opacity-60 cursor-not-allowed" : "hover:scale-105 active:scale-95",
+      ].join(" ")}
+    >
+      <ThumbsUp
+        size={11}
+        className={[
+          "transition-all",
+          optimistic.voted ? "fill-blue-400/40 text-blue-300" : "",
+          isPending ? "animate-pulse" : "",
+        ].join(" ")}
+      />
+      <span className="tabular-nums">{optimistic.count}</span>
+    </button>
+  );
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function Dashboard() {
   const [stats,        setStats]        = useState<ApiStats | null>(null);
-  const [recent,       setRecent]       = useState<ApiReport[]>([]);
+  const [reports,      setReports]      = useState<ApiReport[]>([]);
+  const [sortMode,     setSortMode]     = useState<SortMode>("terbaru");
   const [statsLoading, setStatsLoading] = useState(true);
   const [feedLoading,  setFeedLoading]  = useState(true);
   const [error,        setError]        = useState<string | null>(null);
 
-  // Hitung distribusi kategori dari laporan yang sudah diambil
+  const sorted = [...reports].sort((a, b) => {
+    if (sortMode === "terpopuler") {
+      if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    }
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+
   const categoryCounts: Record<DbCategory, number> = {
     WASTE: 0, INFRA: 0, DISTURB: 0, LAND: 0,
   };
-  recent.forEach((r) => {
+  reports.forEach((r) => {
     if (r.category in categoryCounts) categoryCounts[r.category]++;
   });
 
-  // ── Fetch stats ──
   const fetchStats = useCallback(async () => {
     setStatsLoading(true);
     try {
@@ -198,20 +266,15 @@ function Dashboard() {
     }
   }, []);
 
-  // ── Fetch 6 laporan terbaru ──
   const fetchRecent = useCallback(async () => {
     setFeedLoading(true);
     setError(null);
     try {
-      const res = await authFetch("/api/reports/all?page=1&limit=6");
+      const res = await authFetch("/api/reports/all?page=1&limit=20");
       if (res.status === 401) { setError("Sesi habis. Silakan login kembali."); return; }
       if (!res.ok) { setError(`Gagal memuat data (${res.status})`); return; }
       const json: ApiReportsResponse = await res.json();
-      // Urutkan dari yang terbaru
-      const sorted = [...(json.data ?? [])].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
-      setRecent(sorted.slice(0, 6));
+      setReports(json.data ?? []);
     } catch {
       setError("Tidak dapat terhubung ke server.");
     } finally {
@@ -222,7 +285,6 @@ function Dashboard() {
   useEffect(() => { fetchStats();  }, [fetchStats]);
   useEffect(() => { fetchRecent(); }, [fetchRecent]);
 
-  // ── Stat card config ──
   const statCards = [
     {
       label: "Total Laporan",
@@ -253,6 +315,8 @@ function Dashboard() {
       accent: "var(--status-resolved, #10b981)",
     },
   ];
+
+  const topVotedCount = sorted[0]?.voteCount ?? 0;
 
   return (
     <main className="flex-1 px-5 md:px-10 py-8 max-w-[1500px] w-full mx-auto">
@@ -301,23 +365,73 @@ function Dashboard() {
         <div className="lg:col-span-2 glass rounded-2xl p-6 shadow-soft">
           <div className="flex items-center justify-between mb-5">
             <div>
-              <h2 className="font-display text-xl font-semibold">Pengaduan Sebelumnya</h2>
+              <h2 className="font-display text-xl font-semibold">Pengaduan Masyarakat</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Laporan terbaru dari masyarakat
+                {sortMode === "terpopuler"
+                  ? "Diurutkan berdasarkan dukungan terbanyak"
+                  : "Laporan terbaru dari masyarakat"}
               </p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              {/* Sort Toggle */}
+              <div className="flex items-center gap-1 glass rounded-xl p-1">
+                <button
+                  onClick={() => setSortMode("terbaru")}
+                  className={[
+                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-smooth whitespace-nowrap",
+                    sortMode === "terbaru"
+                      ? "bg-white/10 text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  ].join(" ")}
+                >
+                  <Clock size={11} />
+                  Terbaru
+                </button>
+                <button
+                  onClick={() => setSortMode("terpopuler")}
+                  className={[
+                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-smooth whitespace-nowrap",
+                    sortMode === "terpopuler"
+                      ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                      : "text-muted-foreground hover:text-foreground",
+                  ].join(" ")}
+                >
+                  <ThumbsUp size={11} className={sortMode === "terpopuler" ? "fill-blue-400/30" : ""} />
+                  Terpopuler
+                </button>
+              </div>
+
               <button
                 onClick={fetchRecent}
                 className="text-xs text-muted-foreground hover:text-foreground transition-smooth flex items-center gap-1.5"
               >
-                <RefreshCw size={12} /> Refresh
+                <RefreshCw size={12} />
               </button>
               <Link to="/incoming-reports" className="text-xs text-accent hover:underline">
                 Lihat Semua →
               </Link>
             </div>
           </div>
+
+          {/* Most Voted highlight banner */}
+          <AnimatePresence>
+            {sortMode === "terpopuler" && !feedLoading && topVotedCount > 0 && (
+              <motion.div
+                key="top-voted-banner"
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="mb-4 flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300"
+              >
+                <Flame size={12} className="text-blue-400 shrink-0" />
+                <span>
+                  <span className="font-semibold">{sorted[0]?.title}</span>
+                  {" "}mendapatkan dukungan terbanyak dengan{" "}
+                  <span className="font-semibold">{topVotedCount} suara</span>
+                </span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Loading state */}
           {feedLoading && (
@@ -351,47 +465,77 @@ function Dashboard() {
           {/* Data */}
           {!feedLoading && !error && (
             <div className="space-y-2">
-              {recent.length === 0 && (
+              {sorted.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-10">
                   Belum ada laporan.
                 </p>
               )}
-              {recent.map((r, i) => {
-                const cat    = CATEGORY_DISPLAY[r.category] ?? { label: r.category, color: "gray" };
-                const status = STATUS_DISPLAY[r.status]     ?? { label: r.status, variant: "new" };
-                return (
-                  <motion.div
-                    key={r.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.05 }}
-                  >
-                    <Link
-                      to="/map"
-                      className="flex items-center gap-4 p-3 rounded-xl hover:bg-white/5 transition-smooth border border-transparent hover:border-border"
+              <AnimatePresence mode="popLayout">
+                {sorted.slice(0, 6).map((r, i) => {
+                  const cat        = CATEGORY_DISPLAY[r.category] ?? { label: r.category, color: "gray" };
+                  const status     = STATUS_DISPLAY[r.status]     ?? { label: r.status, variant: "new" };
+                  const isTopVoted = sortMode === "terpopuler" && i === 0 && r.voteCount > 0;
+
+                  return (
+                    <motion.div
+                      key={r.id}
+                      layout
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.97 }}
+                      transition={{ delay: i * 0.04, layout: { duration: 0.3 } }}
                     >
-                      <img
-                        src={r.imageUrl ?? PLACEHOLDER_IMG}
-                        alt={r.title}
-                        loading="lazy"
-                        onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
-                        className="h-14 w-14 rounded-lg object-cover shrink-0 border border-border/30"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap mb-1">
-                          <CategoryBadge category={cat.color} label={cat.label} />
-                          <StatusBadge status={status.variant as any} />
+              
+                      <Link
+                        to="/map"
+                        search={{ id: r.id, lat: undefined, lng: undefined }}
+                        className={[
+                          "flex items-center gap-4 p-3 rounded-xl transition-smooth border",
+                          isTopVoted
+                            ? "bg-blue-500/5 border-blue-500/20 hover:bg-blue-500/10"
+                            : "hover:bg-white/5 border-transparent hover:border-border",
+                        ].join(" ")}
+                      >
+                        {/* Rank badge (only in terpopuler mode) */}
+                        {sortMode === "terpopuler" && (
+                          <span
+                            className={[
+                              "shrink-0 h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold",
+                              i === 0 ? "bg-blue-500/20 text-blue-300 border border-blue-500/30" :
+                              i === 1 ? "bg-white/10 text-white/60" :
+                              i === 2 ? "bg-white/5 text-white/40" : "bg-transparent text-muted-foreground/40",
+                            ].join(" ")}
+                          >
+                            {i + 1}
+                          </span>
+                        )}
+
+                        <img
+                          src={r.imageUrl ?? PLACEHOLDER_IMG}
+                          alt={r.title}
+                          loading="lazy"
+                          onError={(e) => { (e.target as HTMLImageElement).src = PLACEHOLDER_IMG; }}
+                          className="h-14 w-14 rounded-lg object-cover shrink-0 border border-border/30"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            <CategoryBadge category={cat.color} label={cat.label} />
+                            <StatusBadge status={status.variant as any} />
+                          </div>
+                          <div className="text-sm font-medium truncate">{r.title}</div>
+                          <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                            <MapPin size={11} />
+                            {toTitle(r.village)}, {toTitle(r.city)} · {timeAgo(r.createdAt)}
+                          </div>
                         </div>
-                        <div className="text-sm font-medium truncate">{r.title}</div>
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
-                          <MapPin size={11} />
-                          {toTitle(r.village)}, {toTitle(r.city)} · {timeAgo(r.createdAt)}
-                        </div>
-                      </div>
-                    </Link>
-                  </motion.div>
-                );
-              })}
+
+                        {/* Mini Vote Button */}
+                        <MiniVoteButton reportDbId={r.id} initialCount={r.voteCount} />
+                      </Link>
+                    </motion.div>
+                  );
+                })}
+              </AnimatePresence>
             </div>
           )}
         </div>
@@ -438,6 +582,60 @@ function Dashboard() {
             </div>
           </div>
 
+          {/* Top Supported Reports */}
+          {!feedLoading && !error && (
+            <div className="glass rounded-2xl p-6 shadow-soft">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <ThumbsUp size={14} className="text-blue-400" />
+                  <h3 className="font-semibold text-sm">Dukungan Terbanyak</h3>
+                </div>
+                <button
+                  onClick={() => setSortMode("terpopuler")}
+                  className="text-xs text-accent hover:underline"
+                >
+                  Urutkan →
+                </button>
+              </div>
+              <div className="space-y-3">
+                {[...reports]
+                  .sort((a, b) => b.voteCount - a.voteCount)
+                  .slice(0, 4)
+                  .map((r, i) => (
+                    /*
+                     * Link ke /map?id=<cuid> agar deep-link bekerja
+                     * dari widget "Dukungan Terbanyak" juga
+                     */
+                    <Link
+                      key={r.id}
+                      to="/map"
+                      search={{ id: r.id }}
+                      className="flex items-center gap-3 hover:opacity-80 transition-smooth"
+                    >
+                      <span className="text-[11px] font-bold text-muted-foreground/50 w-4 shrink-0">
+                        {i + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] truncate leading-snug">{r.title}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          {toTitle(r.city)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 text-[11px] text-blue-400 shrink-0">
+                        <ThumbsUp size={10} className="fill-blue-400/30" />
+                        <span className="font-semibold tabular-nums">{r.voteCount}</span>
+                      </div>
+                    </Link>
+                  ))}
+                {reports.every(r => r.voteCount === 0) && (
+                  <p className="text-xs text-muted-foreground text-center py-2">
+                    Belum ada laporan yang didukung.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Category Distribution */}
           <div className="glass rounded-2xl p-6 shadow-soft">
             <div className="flex items-center justify-between mb-4">
@@ -466,10 +664,10 @@ function Dashboard() {
                     key={k}
                     category={k}
                     count={categoryCounts[k]}
-                    total={recent.length}
+                    total={reports.length}
                   />
                 ))}
-                {recent.length === 0 && (
+                {reports.length === 0 && (
                   <p className="text-xs text-muted-foreground text-center py-4">
                     Tidak ada data kategori.
                   </p>
