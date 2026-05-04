@@ -7,10 +7,13 @@ import { useState, useEffect, useCallback, useOptimistic, useTransition } from "
 import {
   ArrowUpRight, Activity, Clock, CheckCircle2, AlertCircle,
   MapPin, Plus, TrendingUp, Loader2, AlertTriangle, RefreshCw,
-  ThumbsUp, ArrowDownUp, Flame,
+  ThumbsUp, Flame,
 } from "lucide-react";
 import { authFetch } from "@/data/login";
 import { StatusBadge, CategoryBadge } from "@/components/civic/StatusBadge";
+// ✅ HAPUS baris lama: import { commentsRouter } from "./CommentSection";
+// CommentSection adalah komponen React, bukan router server.
+// Ia dipakai di map.tsx (detail panel), bukan di sini.
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -100,7 +103,7 @@ function Skeleton({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded-lg bg-white/5 ${className ?? ""}`} />;
 }
 
-// ─── Stat Card ─────────────────────────────────────────────────────────────────
+// ─── Stat Card ────────────────────────────────────────────────────────────────
 function StatCard({
   label, value, sub, icon: Icon, accent, delay,
 }: {
@@ -485,7 +488,10 @@ function Dashboard() {
                       exit={{ opacity: 0, scale: 0.97 }}
                       transition={{ delay: i * 0.04, layout: { duration: 0.3 } }}
                     >
-              
+                      {/*
+                       * ✅ FIX: search harus menyertakan semua field yang dideklarasikan
+                       * di validateSearch map.tsx: { id, lat, lng }
+                       */}
                       <Link
                         to="/map"
                         search={{ id: r.id, lat: undefined, lng: undefined }}
@@ -602,14 +608,10 @@ function Dashboard() {
                   .sort((a, b) => b.voteCount - a.voteCount)
                   .slice(0, 4)
                   .map((r, i) => (
-                    /*
-                     * Link ke /map?id=<cuid> agar deep-link bekerja
-                     * dari widget "Dukungan Terbanyak" juga
-                     */
                     <Link
                       key={r.id}
                       to="/map"
-                      search={{ id: r.id }}
+                      search={{ id: r.id, lat: undefined, lng: undefined }}
                       className="flex items-center gap-3 hover:opacity-80 transition-smooth"
                     >
                       <span className="text-[11px] font-bold text-muted-foreground/50 w-4 shrink-0">

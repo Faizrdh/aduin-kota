@@ -4,10 +4,11 @@ import "dotenv/config";
 import express      from "express";
 import cors         from "cors";
 import cookieParser from "cookie-parser";
-import { authRouter }   from "@/api/auth";
-import { reportsRouter } from "./reports";
-import { votesRouter }   from "./votes"; 
-import { optionalAuth }  from "@/lib/auth.middleware";
+import { authRouter }     from "@/api/auth";
+import { reportsRouter }  from "./reports";
+import { votesRouter }    from "./votes";
+import { commentsRouter } from "./comments"; // ← TAMBAHKAN INI
+import { optionalAuth }   from "@/lib/auth.middleware";
 
 const app  = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
@@ -27,9 +28,10 @@ app.use((req, _res, next) => {
 });
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
-app.use("/api/auth",    authRouter);
-app.use("/api/reports", optionalAuth, reportsRouter);
-app.use("/api/votes",   optionalAuth, votesRouter);
+app.use("/api/auth",     authRouter);
+app.use("/api/reports",  optionalAuth, reportsRouter);
+app.use("/api/votes",    optionalAuth, votesRouter);
+app.use("/api/comments", optionalAuth, commentsRouter); // ← TAMBAHKAN INI
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => res.json({ ok: true, timestamp: new Date().toISOString() }));
@@ -43,11 +45,16 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 app.listen(PORT, () => {
   console.log(`✅ API server running → http://localhost:${PORT}`);
   console.log(`   Routes aktif:`);
-  console.log(`   GET  /api/health`);
-  console.log(`   POST /api/auth/...`);
-  console.log(`   GET  /api/reports/all`);
-  console.log(`   GET  /api/reports/heatmap  ← pastikan ini muncul`);
-  console.log(`   GET  /api/reports/stats`);
-  console.log(`   GET  /api/reports/nearby`);
-  console.log(`   GET  /api/reports/:id`);
+  console.log(`   GET    /api/health`);
+  console.log(`   POST   /api/auth/...`);
+  console.log(`   GET    /api/reports/all`);
+  console.log(`   GET    /api/reports/stats`);
+  console.log(`   GET    /api/reports/heatmap`);
+  console.log(`   GET    /api/reports/nearby`);
+  console.log(`   GET    /api/reports/:id`);
+  console.log(`   GET    /api/votes/status/:reportId`);
+  console.log(`   POST   /api/votes/toggle/:reportId`);
+  console.log(`   GET    /api/comments/:reportId`);   // ← NEW
+  console.log(`   POST   /api/comments/:reportId`);   // ← NEW
+  console.log(`   DELETE /api/comments/:commentId`);  // ← NEW
 });

@@ -1,18 +1,15 @@
 /* eslint-disable */
 // src/data/login.ts
 
+import { useState, useEffect } from "react";
 import {
   getAccessToken,
   setAccessToken,
   clearAccessToken,
-  apiFetch,           // ← tambah ini
+  apiFetch,
 } from "@/lib/apiFetch";
 
-// Re-export supaya komponen lain yang import dari sini tetap bisa pakai
 export { getAccessToken, setAccessToken, clearAccessToken };
-
-// ✅ Re-export authFetch sebagai alias apiFetch
-// → file lain yang import { authFetch } from "@/data/login" tidak perlu diubah
 export { apiFetch as authFetch };
 
 const API = "/api/auth";
@@ -22,9 +19,39 @@ export interface AuthUser {
   id:      string;
   name:    string;
   email:   string;
-  role:    string;
+  role:    "CITIZEN" | "OFFICER" | "ADMIN";
   city:    string;
   avatar?: string;
+}
+
+// ─── Minimal reactive store (tanpa Zustand) ───────────────────────────────────
+// Module-level state yang bisa di-subscribe oleh banyak komponen sekaligus.
+// Saat _currentUser berubah, semua subscriber di-notify dan re-render.
+
+let _currentUser: AuthUser | null = null;
+const _listeners = new Set<() => void>();
+
+/** Internal: update store dan notify semua subscriber */
+function _setCurrentUser(user: AuthUser | null) {
+  _currentUser = user;
+  _listeners.forEach((cb) => cb());
+}
+
+/**
+ * Hook reaktif — gunakan seperti Zustand:
+ *   const user = useAuthStore(s => s.user);
+ *   const role = useAuthStore(s => s.user?.role);
+ */
+export function useAuthStore<T>(selector: (s: { user: AuthUser | null }) => T): T {
+  const [, rerender] = useState(0);
+
+  useEffect(() => {
+    const notify = () => rerender((n) => n + 1);
+    _listeners.add(notify);
+    return () => { _listeners.delete(notify); };
+  }, []);
+
+  return selector({ user: _currentUser });
 }
 
 // ─── authenticate (login) ─────────────────────────────────────────────────────
@@ -40,6 +67,7 @@ export async function authenticate(email: string, password: string): Promise<Aut
   if (!res.ok) throw new Error(json.error ?? "Login gagal.");
 
   setAccessToken(json.accessToken);
+  _setCurrentUser(json.user as AuthUser); // ← update store
   return json.user as AuthUser;
 }
 
@@ -62,6 +90,7 @@ export async function register(
     if (!res.ok) return { success: false, error: json.error ?? "Pendaftaran gagal." };
 
     setAccessToken(json.accessToken);
+    _setCurrentUser(json.user as AuthUser); // ← update store
     return { success: true, user: json.user as AuthUser };
   } catch (err: any) {
     return { success: false, error: err?.message ?? "Terjadi kesalahan jaringan." };
@@ -75,6 +104,7 @@ export async function logout(): Promise<void> {
     credentials: "include",
   }).catch(() => {});
   clearAccessToken();
+  _setCurrentUser(null); // ← update store
 }
 
 // ─── refreshSession — panggil saat app pertama kali load ─────────────────────
@@ -86,13 +116,16 @@ export async function refreshSession(): Promise<AuthUser | null> {
     });
     if (!res.ok) {
       clearAccessToken();
+      _setCurrentUser(null); // ← update store
       return null;
     }
     const json = await res.json();
     setAccessToken(json.accessToken);
+    _setCurrentUser(json.user as AuthUser); // ← update store
     return json.user as AuthUser;
   } catch {
     clearAccessToken();
+    _setCurrentUser(null);
     return null;
   }
 }

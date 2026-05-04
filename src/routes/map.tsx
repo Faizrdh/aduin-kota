@@ -12,7 +12,8 @@ import { MapClient } from "@/components/civic/MapClient";
 import { CATEGORIES, STATUSES, type Category, type Status, type Report } from "@/data/reports";
 import { StatusBadge, CategoryBadge } from "@/components/civic/StatusBadge";
 import { AIBadge } from "@/components/civic/AIBadge";
-import { authFetch } from "@/data/login";
+import { CommentSection } from "@/components/civic/CommentSection"; // ✅ import komponen
+import { authFetch, useAuthStore } from "@/data/login";
 
 // ─── Route Definition ─────────────────────────────────────────────────────────
 export const Route = createFileRoute("/map")({
@@ -23,7 +24,7 @@ export const Route = createFileRoute("/map")({
   }),
   head: () => ({
     meta: [
-      { title: "Map Reports — CivicSpot" },
+      { title: "Map Reports — AduinKota" },
       { name: "description", content: "Interactive dark-mode map of citizen reports across Indonesia." },
     ],
   }),
@@ -67,8 +68,6 @@ const STATUS_MAP: Record<DbStatus, Status> = {
   RESOLVED: "resolved", REJECTED: "cancelled",
 };
 
-// ─── Status yang DISEMBUNYIKAN dari peta (kasus sudah selesai/ditolak) ────────
-// BUG FIX #1: Laporan dengan status ini tidak boleh muncul sebagai pin di peta.
 const HIDDEN_STATUSES: Status[] = ["resolved", "cancelled"];
 
 const PLACEHOLDER_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%231e293b'/%3E%3Ctext x='32' y='36' text-anchor='middle' fill='%2364748b' font-size='10' font-family='sans-serif'%3ENo img%3C/text%3E%3C/svg%3E";
@@ -231,6 +230,9 @@ function VoteButton({ reportDbId, initialCount, initialVoted, size = "md", onVot
 function MapPage() {
   const { reports, loading, error, refetch, lastFetch, getRaw } = useMapReports();
 
+  // ✅ Ambil user yang sedang login untuk CommentSection
+  const currentUser = useAuthStore(s => s.user);
+
   const [activeCats,     setActiveCats]     = useState<Category[]>(Object.keys(CATEGORIES) as Category[]);
   const [activeStat,     setActiveStat]     = useState<Status | "all">("all");
   const [search,         setSearch]         = useState("");
@@ -310,20 +312,15 @@ function MapPage() {
       setSelectedRaw(null);
       setVoteStatus(null);
       if (deepLinkId) {
-        navigate({ to: "/map", search: {}, replace: true });
+        navigate({ to: "/map", search: { id: undefined, lat: undefined, lng: undefined }, replace: true });
       }
       return;
     }
     setSelectedRaw(getRaw(report.id) ?? null);
   }
 
-  // ── BUG FIX #1: Sembunyikan pin laporan yang sudah SELESAI atau DITOLAK ───
-  // Laporan dengan status "resolved" (Selesai) atau "cancelled" (Ditolak)
-  // tidak boleh ditampilkan sebagai pin di peta — kasus sudah tertangani.
-  // Filter ini berjalan SEBELUM filter aktiveStat/kategori/pencarian sehingga
-  // laporan tersebut tidak bisa muncul meskipun user mengubah filter status.
   const filtered = useMemo(() => reports.filter(r =>
-    !HIDDEN_STATUSES.includes(r.status) &&           // ← FIX: sembunyikan resolved & cancelled
+    !HIDDEN_STATUSES.includes(r.status) &&
     activeCats.includes(r.category) &&
     (activeStat === "all" || r.status === activeStat) &&
     (search === "" ||
@@ -332,7 +329,6 @@ function MapPage() {
       r.region.subdistrict.toLowerCase().includes(search.toLowerCase()))
   ), [reports, activeCats, activeStat, search]);
 
-  // Hitung total laporan AKTIF (bukan resolved/cancelled) untuk badge
   const activeReports = useMemo(() =>
     reports.filter(r => !HIDDEN_STATUSES.includes(r.status)),
   [reports]);
@@ -406,7 +402,6 @@ function MapPage() {
           )}
         </div>
 
-        {/* Status filter — hanya tampilkan status AKTIF (bukan resolved/cancelled) */}
         <div className="glass-strong rounded-2xl p-1.5 items-center gap-1 pointer-events-auto shadow-elevated hidden sm:flex flex-wrap">
           <button
             onClick={() => setActiveStat("all")}
@@ -417,7 +412,7 @@ function MapPage() {
             All
           </button>
           {(Object.keys(STATUSES) as Status[])
-            .filter(s => !HIDDEN_STATUSES.includes(s))  // ← sembunyikan tab resolved/cancelled
+            .filter(s => !HIDDEN_STATUSES.includes(s))
             .map(s => (
               <button
                 key={s}
@@ -452,7 +447,6 @@ function MapPage() {
               <RefreshCw size={13} />
             </button>
           )}
-          {/* Badge: tampilkan jumlah laporan AKTIF / total */}
           <div className="glass-strong rounded-2xl px-3 py-2 flex items-center gap-2 shadow-elevated text-xs">
             <Layers size={13} className="text-accent" />
             <span className="font-medium">{filtered.length}</span>
@@ -542,7 +536,6 @@ function MapPage() {
           {(Object.keys(CATEGORIES) as Category[]).map(c => {
             const cat    = CATEGORIES[c];
             const active = activeCats.includes(c);
-            // Hitung hanya laporan AKTIF per kategori
             const count  = activeReports.filter(r => r.category === c).length;
             return (
               <button
@@ -641,7 +634,7 @@ function MapPage() {
               </div>
             </div>
 
-            {/* Konten */}
+            {/* Konten — scrollable */}
             <div className="p-5 flex-1 overflow-y-auto">
               <div className="text-[10px] text-muted-foreground tracking-wider uppercase font-mono">
                 {selected.id}
@@ -720,6 +713,15 @@ function MapPage() {
                 <Row icon={<span className="text-[10px]">👤</span>} label="Pelapor" value={selected.reporter} />
                 <Row icon={<span className="text-[10px]">⏱</span>}  label="Dikirim"  value={timeAgo(selected.createdAt)} />
               </div>
+
+              {/* ✅ CommentSection — desktop detail panel */}
+              {selectedRaw && (
+                <CommentSection
+                  reportId={selectedRaw.id}
+                  currentUserId={currentUser?.id}
+                  currentUserRole={currentUser?.role as any}
+                />
+              )}
             </div>
 
             <div className="p-4 border-t border-border flex gap-2 shrink-0">
@@ -741,7 +743,7 @@ function MapPage() {
             key="mobile-sheet"
             initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
             transition={{ type: "spring", stiffness: 300, damping: 32 }}
-            className="absolute bottom-0 left-0 right-0 glass-strong rounded-t-3xl shadow-elevated z-[400] flex flex-col md:hidden max-h-[60vh] overflow-hidden"
+            className="absolute bottom-0 left-0 right-0 glass-strong rounded-t-3xl shadow-elevated z-[400] flex flex-col md:hidden max-h-[70vh] overflow-hidden"
           >
             <div className="flex justify-center pt-3 pb-1 shrink-0">
               <div className="h-1 w-10 rounded-full bg-white/20" />
@@ -801,6 +803,16 @@ function MapPage() {
                   )
                 )}
               </div>
+
+              {/* ✅ CommentSection — mobile bottom sheet (compact mode) */}
+              {selectedRaw && (
+                <CommentSection
+                  reportId={selectedRaw.id}
+                  currentUserId={currentUser?.id}
+                  currentUserRole={currentUser?.role as any}
+                  compact
+                />
+              )}
             </div>
             <div className="px-4 pb-5 pt-2 flex gap-2 shrink-0 border-t border-border">
               <button className="flex-1 px-3 py-2.5 rounded-xl glass text-xs font-medium hover:bg-white/10 transition-smooth">

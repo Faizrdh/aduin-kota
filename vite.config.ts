@@ -24,6 +24,12 @@ export default defineConfig({
           changeOrigin: true,
         },
 
+          // ── Express API — Comments ────────────────────────────────────────────
+        "/api/comments": {
+          target: "http://localhost:3001",
+          changeOrigin: true,
+        },
+
         // ── emsifa API Wilayah Indonesia ──────────────────────────────────────
         "/api-wilayah": {
           target: "https://emsifa.github.io",

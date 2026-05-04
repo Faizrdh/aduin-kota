@@ -43,6 +43,8 @@ model User {
   reports       Report[]
   reportJoins   ReportJoin[]
   votes         Vote[]
+  comments      Comment[]
+  commentVotes  CommentVote[]
 
   @@map("users")
 }
@@ -67,8 +69,11 @@ model Report {
   category    ReportCategory
   status      ReportStatus   @default(PENDING)
 
-  voteCount Int    @default(0)
-  votes     Vote[]
+  voteCount    Int @default(0)
+  commentCount Int @default(0)
+
+  votes    Vote[]
+  comments Comment[]
 
   lat      Float
   lng      Float
@@ -98,6 +103,7 @@ model Report {
   @@index([userId])
   @@index([ai_label])
   @@index([voteCount])
+  @@index([commentCount])
   @@map("reports")
 }
 
@@ -128,4 +134,57 @@ model Vote {
   @@index([reportId])
   @@index([userId])
   @@map("votes")
+}
+
+model Comment {
+  id       String  @id @default(cuid())
+  content  String
+  isEdited Boolean @default(false)
+
+  // Soft-delete: set deletedAt + hapus content → tampil "[komentar dihapus]"
+  deletedAt DateTime?
+
+  // Cached upvote counter (atomically maintained via CommentVote transactions)
+  upvoteCount Int @default(0)
+
+  // ── Relations ──────────────────────────────────────────────────────────────
+  reportId String
+  report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Self-referential: reply ke komentar lain
+  parentId String?
+  parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies  Comment[] @relation("CommentReplies")
+
+  votes CommentVote[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([reportId])
+  @@index([userId])
+  @@index([parentId])
+  @@index([reportId, createdAt])
+  @@index([upvoteCount])
+  @@map("comments")
+}
+
+// ─── CommentVote ──────────────────────────────────────────────────────────────
+// Upvote unik per user per komentar.
+// Toggle: create → increment, delete → decrement (sama polanya dengan Vote).
+model CommentVote {
+  id        String   @id @default(cuid())
+  userId    String
+  commentId String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment   Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, commentId])
+  @@index([commentId])
+  @@index([userId])
+  @@map("comment_votes")
 }
