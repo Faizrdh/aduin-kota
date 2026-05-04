@@ -802,7 +802,48 @@ router.get("/:id", optionalAuth, async (req, res, next) => {
     });
     if (!report)
       return res.status(404).json({ error: "Laporan tidak ditemukan." });
-    return res.json({ data: report });
+
+    // ── Nearby reports dalam radius 2 km ──────────────────────────────────────
+    const NEARBY_RADIUS_M = 2_000;
+    const bbox = boundingBox(report.lat, report.lng, NEARBY_RADIUS_M);
+
+    const candidates = await prisma.report.findMany({
+      where: {
+        lat: bbox.lat,
+        lng: bbox.lng,
+        id:  { not: report.id },
+        status: { notIn: [ReportStatus.RESOLVED, ReportStatus.REJECTED] },
+      } as any,
+      select: {
+        id:           true,
+        title:        true,
+        category:     true,
+        status:       true,
+        lat:          true,
+        lng:          true,
+        imageUrl:     true,
+        city:         true,
+        district:     true,
+        village:      true,
+        createdAt:    true,
+        _count:       { select: { joins: true } },
+      },
+      take: 30,
+    });
+
+    // Filter haversine presisi + sort terdekat + batas 10 item
+    const nearby = candidates
+      .map((r) => ({
+        ...r,
+        distanceMeters: Math.round(
+          haversineMeters(report.lat, report.lng, r.lat, r.lng)
+        ),
+      }))
+      .filter((r) => r.distanceMeters <= NEARBY_RADIUS_M)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters)
+      .slice(0, 10);
+
+    return res.json({ data: report, nearby });
   } catch (err) {
     next(err);
   }
