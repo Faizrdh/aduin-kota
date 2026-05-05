@@ -16,6 +16,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as LandingRouteImport } from './routes/landing'
 import { Route as IncomingReportsRouteImport } from './routes/incoming-reports'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
+import { Route as AdminCreateUserRouteImport } from './routes/admin-create-user'
 import { Route as IndexRouteImport } from './routes/index'
 
 const SubmitRoute = SubmitRouteImport.update({
@@ -53,6 +54,11 @@ const AnalyticsRoute = AnalyticsRouteImport.update({
   path: '/analytics',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminCreateUserRoute = AdminCreateUserRouteImport.update({
+  id: '/admin-create-user',
+  path: '/admin-create-user',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -61,6 +67,7 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin-create-user': typeof AdminCreateUserRoute
   '/analytics': typeof AnalyticsRoute
   '/incoming-reports': typeof IncomingReportsRoute
   '/landing': typeof LandingRoute
@@ -71,6 +78,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin-create-user': typeof AdminCreateUserRoute
   '/analytics': typeof AnalyticsRoute
   '/incoming-reports': typeof IncomingReportsRoute
   '/landing': typeof LandingRoute
@@ -82,6 +90,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin-create-user': typeof AdminCreateUserRoute
   '/analytics': typeof AnalyticsRoute
   '/incoming-reports': typeof IncomingReportsRoute
   '/landing': typeof LandingRoute
@@ -94,6 +103,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin-create-user'
     | '/analytics'
     | '/incoming-reports'
     | '/landing'
@@ -104,6 +114,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin-create-user'
     | '/analytics'
     | '/incoming-reports'
     | '/landing'
@@ -114,6 +125,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin-create-user'
     | '/analytics'
     | '/incoming-reports'
     | '/landing'
@@ -125,6 +137,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminCreateUserRoute: typeof AdminCreateUserRoute
   AnalyticsRoute: typeof AnalyticsRoute
   IncomingReportsRoute: typeof IncomingReportsRoute
   LandingRoute: typeof LandingRoute
@@ -185,6 +198,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AnalyticsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin-create-user': {
+      id: '/admin-create-user'
+      path: '/admin-create-user'
+      fullPath: '/admin-create-user'
+      preLoaderRoute: typeof AdminCreateUserRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -197,6 +217,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminCreateUserRoute: AdminCreateUserRoute,
   AnalyticsRoute: AnalyticsRoute,
   IncomingReportsRoute: IncomingReportsRoute,
   LandingRoute: LandingRoute,

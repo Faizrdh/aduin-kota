@@ -7,7 +7,8 @@ import cookieParser from "cookie-parser";
 import { authRouter }     from "@/api/auth";
 import { reportsRouter }  from "./reports";
 import { votesRouter }    from "./votes";
-import { commentsRouter } from "./comments"; // ← TAMBAHKAN INI
+import { commentsRouter } from "./comments"; 
+import adminUsersRouter from "./adminUsers";
 import { optionalAuth }   from "@/lib/auth.middleware";
 
 const app  = express();
@@ -31,7 +32,9 @@ app.use((req, _res, next) => {
 app.use("/api/auth",     authRouter);
 app.use("/api/reports",  optionalAuth, reportsRouter);
 app.use("/api/votes",    optionalAuth, votesRouter);
-app.use("/api/comments", optionalAuth, commentsRouter); // ← TAMBAHKAN INI
+app.use("/api/comments", optionalAuth, commentsRouter); 
+app.use("/api/admin/users", adminUsersRouter);
+
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => res.json({ ok: true, timestamp: new Date().toISOString() }));
