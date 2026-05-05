@@ -26,8 +26,9 @@ export const Route = createFileRoute("/")({
 });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type DbStatus   = "PENDING" | "IN_REVIEW" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
+type DbStatus = "PENDING" | "IN_REVIEW" | "IN_PROGRESS" | "DISPATCHED" | "RESOLVED" | "REJECTED";
 type DbCategory = "WASTE" | "INFRA" | "DISTURB" | "LAND";
+type DbPriority = "NORMAL" | "HIGH" | "EMERGENCY";
 type SortMode   = "terbaru" | "terpopuler";
 
 interface ApiReport {
@@ -36,6 +37,7 @@ interface ApiReport {
   description: string;
   category:    DbCategory;
   status:      DbStatus;
+  priority:    DbPriority;
   province:    string;
   city:        string;
   district:    string;
@@ -71,13 +73,20 @@ const CATEGORY_DISPLAY: Record<DbCategory, { label: string; color: string }> = {
 };
 
 const STATUS_DISPLAY: Record<DbStatus, { label: string; variant: string }> = {
-  PENDING:     { label: "Baru",         variant: "new"      },
-  IN_REVIEW:   { label: "Dalam Review", variant: "progress" },
-  IN_PROGRESS: { label: "Dalam Proses", variant: "progress" },
-  RESOLVED:    { label: "Selesai",      variant: "resolved" },
-  REJECTED:    { label: "Ditolak",      variant: "rejected" },
+  PENDING:     { label: "Baru",            variant: "new"        },
+  IN_REVIEW:   { label: "Sedang Ditinjau", variant: "progress"   },
+  IN_PROGRESS: { label: "Dalam Proses",    variant: "progress"   },
+  DISPATCHED:  { label: "Diteruskan",      variant: "dispatched" },
+  RESOLVED:    { label: "Selesai",         variant: "resolved"   },
+  REJECTED:    { label: "Ditolak",         variant: "rejected"   },
 };
 
+// ─── TAMBAH priority config ───────────────────────────────────────────────────
+const PRIORITY_BADGE: Record<DbPriority, { label: string; cls: string } | null> = {
+  NORMAL:    null,
+  HIGH:      { label: "⚡ Prioritas", cls: "bg-amber-500/15 text-amber-300 border border-amber-500/30" },
+  EMERGENCY: { label: "🔥 Darurat",   cls: "bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse" },
+};
 const PLACEHOLDER_IMG =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%231e293b'/%3E%3Ctext x='32' y='36' text-anchor='middle' fill='%2364748b' font-size='10' font-family='sans-serif'%3ENo img%3C/text%3E%3C/svg%3E";
 
@@ -285,8 +294,20 @@ function Dashboard() {
     }
   }, []);
 
-  useEffect(() => { fetchStats();  }, [fetchStats]);
-  useEffect(() => { fetchRecent(); }, [fetchRecent]);
+// ─── GANTI kedua useEffect fetch dengan ini ───────────────────────────────────
+useEffect(() => {
+  fetchStats();
+  // polling setiap 30 detik
+  const id = setInterval(fetchStats, 30_000);
+  return () => clearInterval(id);
+}, [fetchStats]);
+
+useEffect(() => {
+  fetchRecent();
+  // polling setiap 30 detik
+  const id = setInterval(fetchRecent, 30_000);
+  return () => clearInterval(id);
+}, [fetchRecent]);
 
   const statCards = [
     {
@@ -340,7 +361,7 @@ function Dashboard() {
         </div>
         <div className="flex gap-3 shrink-0">
           <Link
-            to="/map"
+            to="/"
             className="px-4 py-2.5 rounded-xl glass-strong text-sm font-medium hover:bg-white/10 transition-smooth flex items-center gap-2"
           >
             Buka Peta <ArrowUpRight size={15} />
@@ -527,6 +548,15 @@ function Dashboard() {
                           <div className="flex items-center gap-2 flex-wrap mb-1">
                             <CategoryBadge category={cat.color} label={cat.label} />
                             <StatusBadge status={status.variant as any} />
+                              {(() => {
+                                const pb = PRIORITY_BADGE[r.priority ?? "NORMAL"];
+                                if (!pb) return null;
+                                return (
+                                  <span className={`inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold ${pb.cls}`}>
+                                    {pb.label}
+                                  </span>
+                                );
+                              })()}
                           </div>
                           <div className="text-sm font-medium truncate">{r.title}</div>
                           <div className="text-[11px] text-muted-foreground flex items-center gap-1.5 mt-0.5">

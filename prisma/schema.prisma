@@ -24,8 +24,15 @@ enum ReportStatus {
   PENDING
   IN_REVIEW
   IN_PROGRESS
+  DISPATCHED
   RESOLVED
   REJECTED
+}
+
+enum Priority {
+  NORMAL
+  HIGH
+  EMERGENCY
 }
 
 model User {
@@ -39,12 +46,13 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  refreshTokens RefreshToken[]
-  reports       Report[]
-  reportJoins   ReportJoin[]
-  votes         Vote[]
-  comments      Comment[]
-  commentVotes  CommentVote[]
+  refreshTokens   RefreshToken[]
+  reports         Report[]
+  reportJoins     ReportJoin[]
+  votes           Vote[]
+  comments        Comment[]
+  commentVotes    CommentVote[]
+  statusHistories StatusHistory[]
 
   @@map("users")
 }
@@ -68,6 +76,7 @@ model Report {
   description String
   category    ReportCategory
   status      ReportStatus   @default(PENDING)
+  priority    Priority       @default(NORMAL)
 
   voteCount    Int @default(0)
   commentCount Int @default(0)
@@ -94,17 +103,37 @@ model Report {
   user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   joins  ReportJoin[]
 
+  statusHistories StatusHistory[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([lat, lng])
   @@index([category])
   @@index([status])
+  @@index([priority])
   @@index([userId])
   @@index([ai_label])
   @@index([voteCount])
   @@index([commentCount])
   @@map("reports")
+}
+
+model StatusHistory {
+  id         String        @id @default(cuid())
+  reportId   String
+  report     Report        @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  fromStatus ReportStatus?
+  toStatus   ReportStatus
+  note       String?
+  adminId    String?
+  admin      User?         @relation(fields: [adminId], references: [id], onDelete: SetNull)
+  createdAt  DateTime      @default(now())
+
+  @@index([reportId])
+  @@index([adminId])
+  @@index([createdAt])
+  @@map("status_histories")
 }
 
 model ReportJoin {
@@ -137,24 +166,18 @@ model Vote {
 }
 
 model Comment {
-  id       String  @id @default(cuid())
-  content  String
-  isEdited Boolean @default(false)
+  id          String    @id @default(cuid())
+  content     String
+  isEdited    Boolean   @default(false)
+  deletedAt   DateTime?
+  upvoteCount Int       @default(0)
 
-  // Soft-delete: set deletedAt + hapus content → tampil "[komentar dihapus]"
-  deletedAt DateTime?
-
-  // Cached upvote counter (atomically maintained via CommentVote transactions)
-  upvoteCount Int @default(0)
-
-  // ── Relations ──────────────────────────────────────────────────────────────
   reportId String
   report   Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Self-referential: reply ke komentar lain
   parentId String?
   parent   Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   replies  Comment[] @relation("CommentReplies")
@@ -172,9 +195,6 @@ model Comment {
   @@map("comments")
 }
 
-// ─── CommentVote ──────────────────────────────────────────────────────────────
-// Upvote unik per user per komentar.
-// Toggle: create → increment, delete → decrement (sama polanya dengan Vote).
 model CommentVote {
   id        String   @id @default(cuid())
   userId    String

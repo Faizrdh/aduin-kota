@@ -44,7 +44,8 @@ export const Route = createFileRoute("/map")({
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type DbCategory = "WASTE" | "INFRA" | "DISTURB" | "LAND";
-type DbStatus   = "PENDING" | "IN_REVIEW" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
+type DbStatus = "PENDING" | "IN_REVIEW" | "IN_PROGRESS" | "DISPATCHED" | "RESOLVED" | "REJECTED";
+type DbPriority = "NORMAL" | "HIGH" | "EMERGENCY";
 
 interface ApiReport {
   id:               string;
@@ -52,6 +53,7 @@ interface ApiReport {
   description:      string;
   category:         DbCategory;
   status:           DbStatus;
+  priority:         DbPriority;
   lat:              number;
   lng:              number;
   province:         string;
@@ -86,8 +88,12 @@ const CATEGORY_MAP: Record<DbCategory, Category> = {
   WASTE: "waste", INFRA: "infra", DISTURB: "disturb", LAND: "land",
 };
 const STATUS_MAP: Record<DbStatus, Status> = {
-  PENDING: "new", IN_REVIEW: "progress", IN_PROGRESS: "progress",
-  RESOLVED: "resolved", REJECTED: "cancelled",
+  PENDING:     "new",
+  IN_REVIEW:   "progress",
+  IN_PROGRESS: "progress",
+  DISPATCHED:  "dispatched",   
+  RESOLVED:    "resolved",
+  REJECTED:    "cancelled",
 };
 
 const HIDDEN_STATUSES: Status[] = ["resolved", "cancelled"];
@@ -183,7 +189,7 @@ function useMapReports() {
 
   useEffect(() => {
     fetchReports();
-    const id = setInterval(fetchReports, 60_000);
+    const id = setInterval(fetchReports, 30_000); // was 60_000
     return () => clearInterval(id);
   }, [fetchReports]);
 
@@ -1079,6 +1085,20 @@ function MapPage() {
                 {selected.id}
               </div>
               <h3 className="font-display text-lg font-semibold mt-1 leading-snug">{selected.title}</h3>
+              {selectedRaw?.priority && selectedRaw.priority !== "NORMAL" && (
+                <div className="mt-2">
+                  {selectedRaw.priority === "EMERGENCY" && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-bold bg-red-500/20 text-red-300 border-red-500/40 animate-pulse">
+                      🔥 DARURAT — Penanganan Segera
+                    </span>
+                  )}
+                  {selectedRaw.priority === "HIGH" && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[11px] font-semibold bg-amber-500/15 text-amber-300 border-amber-500/30">
+                      ⚡ Prioritas Tinggi
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* AI Badge */}
               {(selectedRaw?.ai_label || selectedRaw?.ai_label === null) && (

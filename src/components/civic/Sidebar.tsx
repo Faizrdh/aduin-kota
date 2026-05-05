@@ -16,12 +16,12 @@ const NAV = [
   { to: "/map",              label: "Peta Pengajuan", icon: MapIcon         },
   { to: "/submit",           label: "Buat Laporan",   icon: PlusCircle      },
   { to: "/my-reports",       label: "Laporan Saya",   icon: FileText        },
-  { to: "/incoming-reports", label: "Laporan Masuk",  icon: Inbox           },
-  { to: "/analytics",        label: "Data Analitik",  icon: BarChart3       },
 ] as const;
 
 const NAV_ADMIN = [
-  { to: "/admin-create-user", label: "Buat Pengguna", icon: UserPlus },
+  { to: "/analytics",         label: "Data Analitik", icon: BarChart3 }, 
+  { to: "/admin-create-user", label: "Pengguna", icon: UserPlus  },
+  { to: "/incoming-reports", label: "Laporan Masuk",  icon: Inbox           },
 ] as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────

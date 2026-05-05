@@ -9,7 +9,7 @@ import {
   Loader2, Users, X, Info, AlertCircle, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { MapClient } from "@/components/civic/MapClient";
-import { CATEGORIES, type Category } from "@/data/reports";
+import { CATEGORIES, type Category } from "../data/reports";
 import { authFetch } from "@/data/login";
 import {
   useNearbyReports,

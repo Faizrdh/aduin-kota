@@ -56,7 +56,7 @@ const HEATMAP_WEIGHT: Record<string, number> = {
 };
 
 // ─── GET /api/reports/stats ───────────────────────────────────────────────────
-router.get("/stats", requireAdmin, async (_req, res, next) => {
+router.get("/stats", requireAuth, async (_req, res, next) => {
   try {
     const [total, pending, inReview, inProgress, resolved, rejected] =
       await Promise.all([
@@ -80,7 +80,7 @@ router.get("/stats", requireAdmin, async (_req, res, next) => {
 });
 
 // ─── GET /api/reports/all ─────────────────────────────────────────────────────
-router.get("/all", requireAdmin, async (req, res, next) => {
+router.get("/all", requireAuth, async (req, res, next) => {
   try {
     const status = getString(req.query.status);
     const category = getString(req.query.category);
@@ -188,7 +188,7 @@ router.get("/public", async (req, res, next) => {
 });
 
 // ─── GET /api/reports/heatmap ─────────────────────────────────────────────────
-router.get("/heatmap", requireAdmin, async (req, res, next) => {
+router.get("/heatmap", requireAuth, async (req, res, next) => {
   try {
     const swLat = parseFloat(getString(req.query.swLat));
     const swLng = parseFloat(getString(req.query.swLng));
@@ -330,8 +330,7 @@ router.get("/nearby", optionalAuth, async (req, res, next) => {
   }
 });
 
-// ─── GET /api/reports/analytics ──────────────────────────────────────────────
-// ─── GET /api/reports/analytics ──────────────────────────────────────────────
+
 router.get("/analytics", requireAdmin, async (req, res, next) => {
   try {
     const now = new Date();
