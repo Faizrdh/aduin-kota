@@ -121,11 +121,6 @@ export function AIBadge({ label, score, overridden, size = "md", showScore, clas
   );
 }
 
-// ─── Komponen Admin: AIBadgeAdmin (dengan dropdown override) ──────────────────
-//
-// Menampilkan badge yang sama dengan AIBadge, tapi dengan tombol edit (✏️)
-// saat di-hover. Klik tombol → dropdown pilih dinas lain → PATCH ke API.
-//
 
 export function AIBadgeAdmin({
   label, score, overridden, reportId, size = "md", showScore, className = "", onOverride,

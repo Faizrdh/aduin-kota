@@ -54,7 +54,7 @@ app.listen(PORT, () => {
   console.log(`   GET    /api/reports/:id`);
   console.log(`   GET    /api/votes/status/:reportId`);
   console.log(`   POST   /api/votes/toggle/:reportId`);
-  console.log(`   GET    /api/comments/:reportId`);   // ← NEW
-  console.log(`   POST   /api/comments/:reportId`);   // ← NEW
-  console.log(`   DELETE /api/comments/:commentId`);  // ← NEW
+  console.log(`   GET    /api/comments/:reportId`);   
+  console.log(`   POST   /api/comments/:reportId`);   
+  console.log(`   DELETE /api/comments/:commentId`);  
 });

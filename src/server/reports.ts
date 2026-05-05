@@ -331,231 +331,238 @@ router.get("/nearby", optionalAuth, async (req, res, next) => {
 });
 
 // ─── GET /api/reports/analytics ──────────────────────────────────────────────
-// Harus didefinisikan SEBELUM /:id agar "analytics" tidak
-// di-capture sebagai param id.
-// Diproteksi requireAdmin — konsisten dengan /stats dan /all.
-router.get("/analytics", requireAdmin, async (_req, res, next) => {
+// ─── GET /api/reports/analytics ──────────────────────────────────────────────
+router.get("/analytics", requireAdmin, async (req, res, next) => {
   try {
     const now = new Date();
-    // Window waktu
-    const d7  = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000); // 7 hari lalu
-    const d14 = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000); // 14 hari lalu
 
-    // ── Semua query dijalankan paralel ────────────────────────────────────────
+    // ── Parse range param ─────────────────────────────────────────────────────
+    // Supported: "1d" | "7d" | "30d" | "90d" | "365d" | "all"
+    const RANGE_MS: Record<string, number> = {
+      "1d":   1  * 24 * 60 * 60 * 1000,
+      "7d":   7  * 24 * 60 * 60 * 1000,
+      "30d":  30 * 24 * 60 * 60 * 1000,
+      "90d":  90 * 24 * 60 * 60 * 1000,
+      "365d": 365 * 24 * 60 * 60 * 1000,
+    };
+    const rangeParam = getString(req.query.range) || "7d";
+    const isAll      = rangeParam === "all";
+    const rangeMs    = RANGE_MS[rangeParam] ?? RANGE_MS["7d"];
+
+    // Primary window: now - rangeMs  →  now
+    const dFrom    = isAll ? new Date(0) : new Date(now.getTime() - rangeMs);
+    // Comparison window: previous period of same length
+    const dFromPrev = isAll ? new Date(0) : new Date(dFrom.getTime() - rangeMs);
+
+    // ── Trend chart config ─────────────────────────────────────────────────────
+    // Granularity & label format depends on range
+    type Granularity = "hour" | "day" | "week" | "month";
+    const granularity: Granularity =
+      rangeParam === "1d"   ? "hour"  :
+      rangeParam === "7d"   ? "day"   :
+      rangeParam === "30d"  ? "day"   :
+      rangeParam === "90d"  ? "week"  : "month"; // 365d, all
+
+    // How many points to show in trend
+    const trendPoints =
+      rangeParam === "1d"   ? 24 :
+      rangeParam === "7d"   ? 7  :
+      rangeParam === "30d"  ? 30 :
+      rangeParam === "90d"  ? 13 :
+      rangeParam === "365d" ? 12 : 12; // all → 12 months
+
+    // ── All queries in parallel ───────────────────────────────────────────────
     const [
-      totalReports,       // Total laporan keseluruhan
-      thisWeekCount,      // Laporan dibuat dalam 7 hari terakhir
-      lastWeekCount,      // Laporan dibuat 7–14 hari lalu (pembanding)
-      resolvedTotal,      // Total RESOLVED keseluruhan (untuk completion rate global)
-      categoryBreakdown,  // Jumlah laporan per kategori
-      allDistrictRows,    // Semua distinct district (wilayah aktif total)
-      thisWeekDistrictRows, // Distinct district yang aktif minggu ini
-      newFor7d,           // Laporan baru 7 hari → untuk kolom "new" di trend chart
-      resolvedThisWeek,   // RESOLVED dalam 7 hari → trend "resolved" + avg respons KPI
-      resolvedLastWeek,   // RESOLVED 7–14 hari lalu → delta avg respons
-      resolvedForCat,     // Semua RESOLVED → avg respons per kategori
-      allForRegion,       // Semua laporan → kalkulasi top regions
+      totalReports,
+      thisWindowCount,
+      prevWindowCount,
+      resolvedTotal,
+      categoryBreakdown,
+      allDistrictRows,
+      thisWindowDistrictRows,
+      newInWindow,
+      resolvedThisWindow,
+      resolvedPrevWindow,
+      resolvedForCat,
+      allForRegion,
     ] = await Promise.all([
       prisma.report.count(),
-      prisma.report.count({ where: { createdAt: { gte: d7 } } }),
-      prisma.report.count({ where: { createdAt: { gte: d14, lt: d7 } } }),
-      prisma.report.count({ where: { status: ReportStatus.RESOLVED } }),
+      prisma.report.count({ where: { createdAt: { gte: dFrom } } }),
+      isAll
+        ? Promise.resolve(0)
+        : prisma.report.count({ where: { createdAt: { gte: dFromPrev, lt: dFrom } } }),
 
+      prisma.report.count({ where: { status: ReportStatus.RESOLVED } }),
       prisma.report.groupBy({ by: ["category"], _count: { id: true } }),
 
-      // distinct districts tidak didukung count() — pakai findMany distinct
+      prisma.report.findMany({ select: { district: true }, distinct: ["district"] }),
       prisma.report.findMany({
-        select: { district: true },
-        distinct: ["district"],
-      }),
-      prisma.report.findMany({
-        where: { createdAt: { gte: d7 } },
-        select: { district: true },
+        where:    { createdAt: { gte: dFrom } },
+        select:   { district: true },
         distinct: ["district"],
       }),
 
-      // Trend chart — new: group by createdAt day
       prisma.report.findMany({
-        where: { createdAt: { gte: d7 } },
-        select: { createdAt: true },
+        where:   { createdAt: { gte: dFrom } },
+        select:  { createdAt: true },
         orderBy: { createdAt: "asc" },
       }),
 
-      // Trend chart — resolved: group by updatedAt day (saat diselesaikan)
-      // Sekaligus dipakai untuk avg response KPI minggu ini
       prisma.report.findMany({
-        where: {
-          status: ReportStatus.RESOLVED,
-          updatedAt: { gte: d7 },
-        },
+        where:  { status: ReportStatus.RESOLVED, updatedAt: { gte: dFrom } },
         select: { createdAt: true, updatedAt: true },
       }),
 
-      // Avg response KPI minggu lalu (pembanding delta)
-      prisma.report.findMany({
-        where: {
-          status: ReportStatus.RESOLVED,
-          updatedAt: { gte: d14, lt: d7 },
-        },
-        select: { createdAt: true, updatedAt: true },
-      }),
+      isAll
+        ? Promise.resolve([] as Array<{ createdAt: Date; updatedAt: Date }>)
+        : prisma.report.findMany({
+            where:  { status: ReportStatus.RESOLVED, updatedAt: { gte: dFromPrev, lt: dFrom } },
+            select: { createdAt: true, updatedAt: true },
+          }),
 
-      // Response time per kategori — semua resolved
       prisma.report.findMany({
-        where: { status: ReportStatus.RESOLVED },
+        where:  { status: ReportStatus.RESOLVED },
         select: { category: true, createdAt: true, updatedAt: true },
       }),
 
-      // Top regions — butuh status + lokasi semua laporan
-      // Hanya ambil field yang diperlukan agar ringan
       prisma.report.findMany({
         select: { district: true, city: true, status: true },
       }),
     ]);
 
-    // ── KPI: Total pengajuan ──────────────────────────────────────────────────
-    const weekDelta =
-      lastWeekCount > 0
-        ? Math.round(
-            ((thisWeekCount - lastWeekCount) / lastWeekCount) * 100
-          )
-        : thisWeekCount > 0
-        ? 100
-        : 0;
+    // ── KPI: Delta pengajuan ──────────────────────────────────────────────────
+    const weekDelta = isAll
+      ? 0
+      : prevWindowCount > 0
+        ? Math.round(((thisWindowCount - prevWindowCount) / prevWindowCount) * 100)
+        : thisWindowCount > 0 ? 100 : 0;
 
-    // ── KPI: Tingkat penyelesaian (global) ────────────────────────────────────
+    // ── KPI: Completion rate ──────────────────────────────────────────────────
     const completionRate =
-      totalReports > 0
-        ? Math.round((resolvedTotal / totalReports) * 100)
-        : 0;
+      totalReports > 0 ? Math.round((resolvedTotal / totalReports) * 100) : 0;
 
-    // Delta completion rate: minggu ini vs minggu lalu
-    // resolvedThisWeek.length / thisWeekCount vs resolvedLastWeek.length / lastWeekCount
-    const completionRateThisWeek =
-      thisWeekCount > 0
-        ? (resolvedThisWeek.length / thisWeekCount) * 100
-        : 0;
-    const completionRateLastWeek =
-      lastWeekCount > 0
-        ? (resolvedLastWeek.length / lastWeekCount) * 100
-        : 0;
-    const completionDelta = Math.round(
-      completionRateThisWeek - completionRateLastWeek
-    );
+    const completionRateThis =
+      thisWindowCount > 0 ? (resolvedThisWindow.length / thisWindowCount) * 100 : 0;
+    const completionRatePrev =
+      prevWindowCount > 0 ? (resolvedPrevWindow.length / prevWindowCount) * 100 : 0;
+    const completionDelta = Math.round(completionRateThis - completionRatePrev);
 
-    // ── KPI: Rata-rata respons ────────────────────────────────────────────────
-    // Proxy: updatedAt − createdAt untuk laporan RESOLVED
-    const calcAvgMs = (
-      rows: Array<{ createdAt: Date; updatedAt: Date }>
-    ): number =>
+    // ── KPI: Avg response time ────────────────────────────────────────────────
+    const calcAvgMs = (rows: Array<{ createdAt: Date; updatedAt: Date }>) =>
       rows.length === 0
         ? 0
-        : rows.reduce(
-            (s, r) =>
-              s + (r.updatedAt.getTime() - r.createdAt.getTime()),
-            0
-          ) / rows.length;
+        : rows.reduce((s, r) => s + (r.updatedAt.getTime() - r.createdAt.getTime()), 0) /
+          rows.length;
 
-    const avgMsNow  = calcAvgMs(resolvedThisWeek);
-    const avgMsLast = calcAvgMs(resolvedLastWeek);
+    const avgMsNow   = calcAvgMs(resolvedThisWindow);
+    const avgMsLast  = calcAvgMs(resolvedPrevWindow);
+    const avgResponseHours = parseFloat((avgMsNow / (1000 * 60 * 60)).toFixed(1));
+    const avgDeltaMin = Math.round((avgMsNow - avgMsLast) / (1000 * 60));
 
-    // Tampilkan dalam jam (1 desimal)
-    const avgResponseHours = parseFloat(
-      (avgMsNow / (1000 * 60 * 60)).toFixed(1)
-    );
-    // Delta dalam menit (positif = lebih lambat, negatif = lebih cepat)
-    const avgDeltaMin = Math.round(
-      (avgMsNow - avgMsLast) / (1000 * 60)
-    );
-
-    // ── KPI: Wilayah aktif ────────────────────────────────────────────────────
+    // ── KPI: Active districts ─────────────────────────────────────────────────
     const activeDistricts = allDistrictRows.length;
-    const activeDistrictsThisWeek = thisWeekDistrictRows.length;
+    const activeDistrictsThisWeek = thisWindowDistrictRows.length;
 
-    // ── Chart: 7-day trend ────────────────────────────────────────────────────
-    // Bangun ordered map dari 6 hari lalu → hari ini
-    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const orderedKeys: string[] = [];
-    const trendMap: Record<
-      string,
-      { day: string; new: number; resolved: number }
-    > = {};
-
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      const key = dayNames[d.getDay()];
-      orderedKeys.push(key);
-      if (!trendMap[key]) trendMap[key] = { day: key, new: 0, resolved: 0 };
+    // ── Chart: Trend (dynamic granularity) ────────────────────────────────────
+    /**
+     * Build a bucket key from a Date based on granularity.
+     * Returns { key: string (used as map key), label: string (displayed) }
+     */
+    function getBucket(d: Date): { key: string; label: string } {
+      switch (granularity) {
+        case "hour": {
+          const h = d.getHours().toString().padStart(2, "0");
+          return { key: `${d.toDateString()}-${h}`, label: `${h}:00` };
+        }
+        case "day": {
+          const names = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+          // For 30d use DD/MM, for 7d use day name
+          if (rangeParam === "30d") {
+            const label = `${d.getDate()}/${d.getMonth() + 1}`;
+            return { key: d.toDateString(), label };
+          }
+          return { key: d.toDateString(), label: names[d.getDay()] };
+        }
+        case "week": {
+          // ISO week number
+          const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+          tmp.setUTCDate(tmp.getUTCDate() + 4 - (tmp.getUTCDay() || 7));
+          const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+          const wk = Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+          return { key: `${d.getFullYear()}-W${wk}`, label: `W${wk}` };
+        }
+        case "month": {
+          const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          return {
+            key:   `${d.getFullYear()}-${d.getMonth()}`,
+            label: `${months[d.getMonth()]} ${d.getFullYear().toString().slice(2)}`,
+          };
+        }
+      }
     }
 
-    // New: group by createdAt
-    for (const r of newFor7d) {
-      const key = dayNames[new Date(r.createdAt).getDay()];
+    // Build ordered bucket list (newest last, trendPoints count)
+    const orderedKeys: string[] = [];
+    const trendMap: Record<string, { day: string; new: number; resolved: number }> = {};
+
+    const unitMs =
+      granularity === "hour"  ? 60 * 60 * 1000 :
+      granularity === "day"   ? 24 * 60 * 60 * 1000 :
+      granularity === "week"  ? 7 * 24 * 60 * 60 * 1000 :
+      30 * 24 * 60 * 60 * 1000; // month ≈ 30d for iteration
+
+    for (let i = trendPoints - 1; i >= 0; i--) {
+      const d    = new Date(now.getTime() - i * unitMs);
+      const { key, label } = getBucket(d);
+      if (!orderedKeys.includes(key)) {
+        orderedKeys.push(key);
+        trendMap[key] = { day: label, new: 0, resolved: 0 };
+      }
+    }
+
+    for (const r of newInWindow) {
+      const { key } = getBucket(new Date(r.createdAt));
       if (trendMap[key]) trendMap[key].new += 1;
     }
-    // Resolved: group by updatedAt (hari diselesaikan)
-    for (const r of resolvedThisWeek) {
-      const key = dayNames[new Date(r.updatedAt).getDay()];
+    for (const r of resolvedThisWindow) {
+      const { key } = getBucket(new Date(r.updatedAt));
       if (trendMap[key]) trendMap[key].resolved += 1;
     }
 
     const trend = orderedKeys.map((k) => trendMap[k]);
 
-    // ── Chart: Response time per kategori ─────────────────────────────────────
-    const catRespMap: Record<
-      string,
-      { totalMs: number; count: number }
-    > = {};
-
+    // ── Chart: Response by category ───────────────────────────────────────────
+    const catRespMap: Record<string, { totalMs: number; count: number }> = {};
     for (const r of resolvedForCat) {
       const ms = r.updatedAt.getTime() - r.createdAt.getTime();
-      if (!catRespMap[r.category])
-        catRespMap[r.category] = { totalMs: 0, count: 0 };
+      if (!catRespMap[r.category]) catRespMap[r.category] = { totalMs: 0, count: 0 };
       catRespMap[r.category].totalMs += ms;
       catRespMap[r.category].count  += 1;
     }
+    const responseByCat = Object.entries(catRespMap).map(([cat, d]) => ({
+      cat,
+      hours: parseFloat((d.totalMs / d.count / (1000 * 60 * 60)).toFixed(1)),
+    }));
 
-    const responseByCat = Object.entries(catRespMap).map(
-      ([cat, d]) => ({
-        cat,
-        // Konversi ms → jam, bulatkan 1 desimal
-        hours: parseFloat(
-          (d.totalMs / d.count / (1000 * 60 * 60)).toFixed(1)
-        ),
-      })
-    );
-
-    // ── Chart: Top regions berdasarkan completion rate ────────────────────────
-    const regionMap: Record<
-      string,
-      { total: number; resolved: number }
-    > = {};
-
+    // ── Chart: Top regions ────────────────────────────────────────────────────
+    const regionMap: Record<string, { total: number; resolved: number }> = {};
     for (const r of allForRegion) {
-      // Gabungkan district + city agar unik
       const key = `${r.district}, ${r.city}`;
       if (!regionMap[key]) regionMap[key] = { total: 0, resolved: 0 };
       regionMap[key].total += 1;
       if (r.status === ReportStatus.RESOLVED) regionMap[key].resolved += 1;
     }
-
     const topRegions = Object.entries(regionMap)
-      // Minimal 2 laporan agar rate bermakna
       .filter(([, d]) => d.total >= 2)
       .map(([name, d]) => ({
         name,
-        rate: Math.round((d.resolved / d.total) * 100),
+        rate:  Math.round((d.resolved / d.total) * 100),
         count: d.total,
       }))
-      // Sort: completion rate tertinggi, tie-break: jumlah laporan terbanyak
       .sort((a, b) => b.rate - a.rate || b.count - a.count)
       .slice(0, 5);
 
-    // ── Response ──────────────────────────────────────────────────────────────
-    // Cache 60 detik — data analytics tidak perlu real-time ketat
     res.setHeader("Cache-Control", "private, max-age=60");
-
     return res.json({
       kpis: {
         totalReports,
@@ -570,7 +577,7 @@ router.get("/analytics", requireAdmin, async (_req, res, next) => {
       trend,
       categoryBreakdown: categoryBreakdown.map((c) => ({
         category: c.category,
-        count: c._count.id,
+        count:    c._count.id,
       })),
       responseByCat,
       topRegions,
