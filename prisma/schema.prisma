@@ -84,14 +84,15 @@ model Report {
   votes    Vote[]
   comments Comment[]
 
-  lat      Float
-  lng      Float
-  province String
-  city     String
-  district String
-  village  String
-  address  String?
-  imageUrl String?
+  lat           Float
+  lng           Float
+  province      String
+  city          String
+  district      String
+  village       String
+  address       String?
+  imageUrl      String?
+  reporterEmail String?   
 
   ai_label         String?
   confidence_score Float?

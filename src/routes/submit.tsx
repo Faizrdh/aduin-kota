@@ -7,6 +7,7 @@ import {
   ChevronRight, ChevronLeft, Check, MapPin, Upload,
   Crosshair, Trash2, Construction, AlertTriangle, MapPinned,
   Loader2, Users, X, Info, AlertCircle, ChevronDown, ChevronUp,
+  Mail,
 } from "lucide-react";
 import { MapClient } from "@/components/civic/MapClient";
 import { CATEGORIES, type Category } from "../data/reports";
@@ -59,6 +60,10 @@ function nominatimUrl(path: string) {
 
 function toTitle(s: string) {
   return s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 // ─── Maps & Aliases ───────────────────────────────────────────────────────────
@@ -162,13 +167,9 @@ function parseNominatimAddress(addr: Record<string, string>) {
   const cityDistrict = addr.city_district || "";
 
   let city: string;
-  if (cityDistrict.toLowerCase().includes("jakarta")) {
-    city = cityDistrict;
-  } else if (!cityBase && cityDistrict) {
-    city = cityDistrict;
-  } else {
-    city = cityBase;
-  }
+  if (cityDistrict.toLowerCase().includes("jakarta")) city = cityDistrict;
+  else if (!cityBase && cityDistrict) city = cityDistrict;
+  else city = cityBase;
 
   const district =
     addr.suburb || addr.subdistrict ||
@@ -195,7 +196,6 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   REJECTED:    { label: "Ditolak",         color: "text-red-400"    },
 };
 
-// ─── Nearby strip constants ───────────────────────────────────────────────────
 const NEARBY_AMBER = "#F59E0B";
 
 // ─── Component Utama ──────────────────────────────────────────────────────────
@@ -236,52 +236,51 @@ function SubmitPage() {
   const revGeoActive = useRef(false);
   const autoGeo      = useRef(false);
 
-  const [title,      setTitle]      = useState("");
-  const [desc,       setDesc]       = useState("");
-  const [imgPreview, setImgPreview] = useState<string | null>(null);
-  const [submitted,  setSubmitted]  = useState(false);
+  const [title,         setTitle]         = useState("");
+  const [desc,          setDesc]          = useState("");
+  const [reporterEmail, setReporterEmail] = useState("");
+  const [imgPreview,    setImgPreview]    = useState<string | null>(null);
+  const [submitted,     setSubmitted]     = useState(false);
 
-  // ── Nearby duplicate detection via hook ────────────────────────────────────
-  // Reactive: fires whenever pos or category changes (with debounce).
-  // Only enabled when user is on step 1+ and has picked a location.
+  // ── Nearby duplicate detection ─────────────────────────────────────────────
   const {
     reports:  nearbyReports,
     loading:  nearbyLoading,
     refetch:  nearbyRefetch,
     clear:    nearbyClean,
   } = useNearbyReports({
-    lat:      pos?.lat ?? null,
-    lng:      pos?.lng ?? null,
+    lat:        pos?.lat ?? null,
+    lng:        pos?.lng ?? null,
     category,
-    radius:   100,
-    enabled:  step >= 1 && pos !== null && category !== null,
+    radius:     100,
+    enabled:    step >= 1 && pos !== null && category !== null,
     debounceMs: 700,
   });
 
-  // UI state for nearby UI panels
-  const [nearbyExpanded,  setNearbyExpanded]  = useState(false);
-  const [showDupModal,    setShowDupModal]    = useState(false);
-  const [submittingNew,   setSubmittingNew]   = useState(false);
-  const [joiningId,       setJoiningId]       = useState<string | null>(null);
-  const [joinedSuccess,   setJoinedSuccess]   = useState(false);
-  const [submitError,     setSubmitError]     = useState<string | null>(null);
+  const [nearbyExpanded, setNearbyExpanded] = useState(false);
+  const [showDupModal,   setShowDupModal]   = useState(false);
+  const [submittingNew,  setSubmittingNew]  = useState(false);
+  const [joiningId,      setJoiningId]      = useState<string | null>(null);
+  const [joinedSuccess,  setJoinedSuccess]  = useState(false);
+  const [submitError,    setSubmitError]    = useState<string | null>(null);
 
   const steps = ["Category", "Location", "Details"];
+
+  // Email validation state
+  const emailTouched  = reporterEmail.length > 0;
+  const emailValid    = !emailTouched || isValidEmail(reporterEmail);
 
   const canNext =
     (step === 0 && category !== null) ||
     (step === 1 && pos !== null && province && city && district && subdistrict) ||
-    (step === 2 && title.trim().length > 3 && desc.trim().length > 5);
+    (step === 2 && title.trim().length > 3 && desc.trim().length > 5 && emailValid);
 
   const commitFlyTo = useCallback((center: [number, number], zoom: number) => {
     flyToSeq.current += 1;
     setFlyTo({ center, zoom, seq: flyToSeq.current });
   }, []);
 
-  // Reset nearby expanded state when location changes
-  useEffect(() => {
-    setNearbyExpanded(false);
-  }, [pos, category]);
+  useEffect(() => { setNearbyExpanded(false); }, [pos, category]);
 
   useEffect(() => {
     setLoadingProv(true);
@@ -346,7 +345,6 @@ function SubmitPage() {
     revGeoActive.current = true;
     setLoadingRev(true);
     setDebugInfo(null);
-
     setProvinceId(""); setProvince("");
     setCityId("");     setCity("");
     setDistrictId(""); setDistrict("");
@@ -374,38 +372,30 @@ function SubmitPage() {
 
       const provinces = await fetchJSON<{ id: string; name: string }[]>(`${EMSIFA}/provinces.json`);
       setProvinceList(provinces);
-
       const matchedProv = fuzzyMatch(provRaw, provinces, PROVINCE_ALIAS);
       if (!matchedProv) { setDebugInfo((p) => `${p}\nProvinsi "${provRaw}" tidak cocok.`); return; }
-      setProvinceId(matchedProv.id);
-      setProvince(matchedProv.name);
+      setProvinceId(matchedProv.id); setProvince(matchedProv.name);
 
       if (!cityRaw) return;
       const cities = await fetchJSON<{ id: string; name: string }[]>(`${EMSIFA}/regencies/${matchedProv.id}.json`);
       setCityList(cities);
-
       const matchedCity = fuzzyMatch(cityRaw, cities, CITY_ALIAS);
       if (!matchedCity) { setDebugInfo((p) => `${p}\nKota "${cityRaw}" tidak cocok — pilih manual.`); return; }
-      setCityId(matchedCity.id);
-      setCity(matchedCity.name);
+      setCityId(matchedCity.id); setCity(matchedCity.name);
 
       if (!distRaw) return;
       const districts = await fetchJSON<{ id: string; name: string }[]>(`${EMSIFA}/districts/${matchedCity.id}.json`);
       setDistrictList(districts);
-
       const matchedDist = fuzzyMatch(distRaw, districts);
       if (!matchedDist) { setDebugInfo((p) => `${p}\nKecamatan "${distRaw}" tidak cocok — pilih manual.`); return; }
-      setDistrictId(matchedDist.id);
-      setDistrict(matchedDist.name);
+      setDistrictId(matchedDist.id); setDistrict(matchedDist.name);
 
       if (!villRaw) return;
       const villages = await fetchJSON<{ id: string; name: string }[]>(`${EMSIFA}/villages/${matchedDist.id}.json`);
       setVillageList(villages);
-
       const matchedVill = fuzzyMatch(villRaw, villages);
       if (matchedVill) {
-        setVillageId(matchedVill.id);
-        setSubdistrict(matchedVill.name);
+        setVillageId(matchedVill.id); setSubdistrict(matchedVill.name);
         setDebugInfo(null);
       } else {
         setDebugInfo((p) => `${p}\nKelurahan "${villRaw}" tidak cocok — pilih manual.`);
@@ -460,19 +450,13 @@ function SubmitPage() {
     reader.readAsDataURL(file);
   };
 
-  // ─── Submit flow (uses hook refetch for freshness) ────────────────────────
+  // ─── Submit flow ────────────────────────────────────────────────────────────
   const checkDuplicatesAndSubmit = async () => {
     if (!pos || !category) return;
     setSubmitError(null);
-
-    // Refetch without debounce — ensures we have the most current data at submit time.
     await nearbyRefetch();
-
-    if (nearbyReports.length > 0) {
-      setShowDupModal(true);
-    } else {
-      await doSubmitNew();
-    }
+    if (nearbyReports.length > 0) setShowDupModal(true);
+    else await doSubmitNew();
   };
 
   const doSubmitNew = async () => {
@@ -481,18 +465,20 @@ function SubmitPage() {
     setSubmitError(null);
 
     try {
+      const emailTrimmed = reporterEmail.trim();
       const body = {
         title,
-        description: desc,
-        category:    category.toUpperCase(),
-        lat:         pos.lat,
-        lng:         pos.lng,
+        description:   desc,
+        category:      category.toUpperCase(),
+        lat:           pos.lat,
+        lng:           pos.lng,
         province,
         city,
         district,
-        village:     subdistrict,
-        address:     address || undefined,
-        imageUrl:    imgPreview || undefined,
+        village:       subdistrict,
+        address:       address || undefined,
+        imageUrl:      imgPreview || undefined,
+        reporterEmail: emailTrimmed || undefined,
       };
 
       const res = await authFetch(API_BASE, {
@@ -507,7 +493,7 @@ function SubmitPage() {
 
       setShowDupModal(false);
       setSubmitted(true);
-      setTimeout(() => navigate({ to: "/my-reports" }), 1800);
+      setTimeout(() => navigate({ to: "/my-reports" }), 2000);
     } catch (err: any) {
       setSubmitError(err?.message ?? "Terjadi kesalahan saat mengirim laporan.");
     } finally {
@@ -529,14 +515,11 @@ function SubmitPage() {
     }
   };
 
-  // Whether user is in a loading state during final submit check
-  const isSubmitting = submittingNew;
-
-  // ─── Nearby strip — shown below map in step 1 ────────────────────────────
+  const isSubmitting  = submittingNew;
   const hasNearby     = nearbyReports.length > 0;
   const nearbyCount   = nearbyReports.length;
 
-  // ─────────────────────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────────────────────────────────────
   return (
     <main className="flex-1 px-5 md:px-10 py-8 max-w-5xl w-full mx-auto">
       <header className="mb-8">
@@ -554,11 +537,9 @@ function SubmitPage() {
         {steps.map((s, i) => (
           <div key={s} className="flex items-center gap-2 flex-1">
             <div className={`h-8 w-8 rounded-full flex items-center justify-center text-xs font-semibold transition-smooth ${
-              i < step
-                ? "gradient-primary text-primary-foreground shadow-glow"
-                : i === step
-                  ? "bg-accent text-accent-foreground shadow-glow-accent"
-                  : "bg-white/5 text-muted-foreground"
+              i < step  ? "gradient-primary text-primary-foreground shadow-glow"
+              : i === step ? "bg-accent text-accent-foreground shadow-glow-accent"
+              : "bg-white/5 text-muted-foreground"
             }`}>
               {i < step ? <Check size={14} /> : i + 1}
             </div>
@@ -626,7 +607,7 @@ function SubmitPage() {
             {/* ── STEP 1 — Location ── */}
             {step === 1 && (
               <div className="grid lg:grid-cols-2 gap-6">
-                {/* Left: Map + GPS + Nearby strip */}
+                {/* Left: Map */}
                 <div>
                   <h2 className="font-display text-xl font-semibold mb-1">Dimana lokasi pengaduan?</h2>
                   <p className="text-sm text-muted-foreground mb-4">
@@ -645,7 +626,6 @@ function SubmitPage() {
                       )}
                     </AnimatePresence>
 
-                    {/* Nearby detection badge — overlaid top-left on map */}
                     <AnimatePresence>
                       {(nearbyLoading || hasNearby) && !loadingRev && (
                         <motion.div
@@ -682,14 +662,11 @@ function SubmitPage() {
                       flyTo={flyTo}
                       height="100%"
                       nearbyReports={nearbyReports}
-                      onNearbySelect={(r) => {
-                        // Clicking a nearby map marker opens the full modal
-                        setShowDupModal(true);
-                      }}
+                      onNearbySelect={() => setShowDupModal(true)}
                     />
                   </div>
 
-                  {/* GPS + coords row */}
+                  {/* GPS + coords */}
                   <div className="flex flex-wrap items-center gap-3 mt-3">
                     <button onClick={handleGPS} disabled={loadingRev}
                       className="px-3 py-2 rounded-xl glass text-xs font-medium hover:bg-white/10 transition-smooth flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -712,7 +689,7 @@ function SubmitPage() {
                     </p>
                   )}
 
-                  {/* ── Live Nearby Reports panel ── */}
+                  {/* Nearby panel */}
                   <AnimatePresence>
                     {nearbyExpanded && hasNearby && (
                       <motion.div
@@ -729,38 +706,25 @@ function SubmitPage() {
                               {nearbyCount} laporan serupa ditemukan dalam radius 100m
                             </span>
                           </div>
-
                           <div className="space-y-2.5 max-h-56 overflow-y-auto pr-1">
                             {nearbyReports.map((r) => {
                               const statusInfo = STATUS_LABEL[r.status] ?? { label: r.status, color: "text-muted-foreground" };
                               const supporters = r._count.joins + 1;
                               return (
-                                <div key={r.id}
-                                  className="rounded-xl border border-white/[0.08] bg-white/[0.04] p-3 flex gap-3 items-start"
-                                >
-                                  {r.imageUrl && (
-                                    <img src={r.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0 border border-border" />
-                                  )}
+                                <div key={r.id} className="rounded-xl border border-white/[0.08] bg-white/[0.04] p-3 flex gap-3 items-start">
+                                  {r.imageUrl && <img src={r.imageUrl} alt="" className="h-12 w-12 rounded-lg object-cover shrink-0 border border-border" />}
                                   <div className="flex-1 min-w-0">
                                     <div className="font-semibold text-xs truncate mb-0.5">{r.title}</div>
                                     <div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-1.5">
-                                      <span className="flex items-center gap-1">
-                                        <MapPin size={9} style={{ color: NEARBY_AMBER }} /> {r.distanceMeters}m
-                                      </span>
-                                      <span className="flex items-center gap-1">
-                                        <Users size={9} /> {supporters} pelapor
-                                      </span>
+                                      <span className="flex items-center gap-1"><MapPin size={9} style={{ color: NEARBY_AMBER }} /> {r.distanceMeters}m</span>
+                                      <span className="flex items-center gap-1"><Users size={9} /> {supporters} pelapor</span>
                                       <span className={`font-semibold ${statusInfo.color}`}>● {statusInfo.label}</span>
                                     </div>
                                     <button
                                       onClick={() => handleJoinReport(r.id)}
                                       disabled={joiningId !== null}
                                       className="w-full py-1.5 rounded-lg border text-[10px] font-semibold flex items-center justify-center gap-1.5 transition-smooth disabled:opacity-50"
-                                      style={{
-                                        background: `${NEARBY_AMBER}18`,
-                                        borderColor: `${NEARBY_AMBER}44`,
-                                        color: NEARBY_AMBER,
-                                      }}
+                                      style={{ background: `${NEARBY_AMBER}18`, borderColor: `${NEARBY_AMBER}44`, color: NEARBY_AMBER }}
                                     >
                                       {joiningId === r.id
                                         ? <><Loader2 size={10} className="animate-spin" /> Bergabung…</>
@@ -772,7 +736,6 @@ function SubmitPage() {
                               );
                             })}
                           </div>
-
                           <p className="text-[10px] text-muted-foreground mt-3 leading-relaxed">
                             Dengan ikut ke laporan yang sudah ada, suara Anda akan memperkuat prioritas penanganan.
                           </p>
@@ -822,15 +785,14 @@ function SubmitPage() {
 
                   <Field label="Detail Alamat" hint="Opsional namun disarankan">
                     <textarea
-                      value={address}
-                      onChange={(e) => setAddress(e.target.value)}
+                      value={address} onChange={(e) => setAddress(e.target.value)}
                       rows={3}
                       placeholder="Tuliskan alamat lokasi kejadian dengan lengkap"
                       className="w-full bg-white/5 border border-border rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-accent transition-smooth resize-none placeholder:text-muted-foreground/60"
                     />
                   </Field>
 
-                  {/* Amber warning card — shown inside right panel when nearby found */}
+                  {/* Nearby warning in right panel */}
                   <AnimatePresence>
                     {hasNearby && !nearbyLoading && (
                       <motion.div
@@ -874,7 +836,46 @@ function SubmitPage() {
                     />
                   </Field>
 
-                  {/* Nearby pre-warning — shown before final submit */}
+                  {/* ── Email field ── */}
+                  <Field label="Email untuk Notifikasi" hint="Opsional — terima update status via email">
+                    <div className="relative">
+                      <Mail
+                        size={14}
+                        className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <input
+                        type="email"
+                        value={reporterEmail}
+                        onChange={(e) => setReporterEmail(e.target.value)}
+                        placeholder="contoh: nama@email.com"
+                        className={`w-full bg-white/5 border rounded-xl px-3.5 py-2.5 pl-9 text-sm outline-none transition-smooth ${
+                          emailTouched && !emailValid
+                            ? "border-red-500/60 focus:border-red-400"
+                            : emailTouched && emailValid
+                              ? "border-emerald-500/60 focus:border-emerald-400"
+                              : "border-border focus:border-accent"
+                        }`}
+                      />
+                    </div>
+                    {/* Feedback */}
+                    {emailTouched && !emailValid && (
+                      <p className="text-[11px] text-red-400 mt-1.5 flex items-center gap-1">
+                        <AlertTriangle size={10} /> Format email tidak valid
+                      </p>
+                    )}
+                    {emailTouched && emailValid && (
+                      <p className="text-[11px] text-emerald-400 mt-1.5 flex items-center gap-1">
+                        <Check size={10} /> Notifikasi akan dikirim ke email ini
+                      </p>
+                    )}
+                    {!emailTouched && (
+                      <p className="text-[11px] text-muted-foreground/60 mt-1.5">
+                        Kosongkan jika tidak ingin menerima notifikasi email.
+                      </p>
+                    )}
+                  </Field>
+
+                  {/* Nearby pre-warning */}
                   {hasNearby ? (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                       className="rounded-xl border px-3.5 py-3 flex items-start gap-2.5"
@@ -900,6 +901,7 @@ function SubmitPage() {
                     </div>
                   )}
 
+                  {/* Location summary */}
                   {province && (
                     <div className="rounded-xl bg-white/[0.04] border border-border px-3.5 py-3">
                       <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2 font-semibold">Lokasi Terpilih</div>
@@ -932,6 +934,7 @@ function SubmitPage() {
                   )}
                 </div>
 
+                {/* Right: Photo upload */}
                 <div>
                   <Field label="Foto (opsional)" hint="JPG atau PNG, maks 10 MB">
                     <label className="block">
@@ -999,11 +1002,17 @@ function SubmitPage() {
             <p className="text-muted-foreground mt-2 max-w-md mx-auto text-sm">
               Kami akan memberi tahu Anda segera setelah laporan Anda ditinjau.
             </p>
+            {reporterEmail && isValidEmail(reporterEmail) && (
+              <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm">
+                <Mail size={14} />
+                Konfirmasi dikirim ke <strong>{reporterEmail}</strong>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ── Modal Duplicate Detection ─────────────────────────────────────────── */}
+      {/* ── Modal Duplicate Detection ── */}
       <AnimatePresence>
         {showDupModal && (
           <motion.div
@@ -1032,7 +1041,6 @@ function SubmitPage() {
                 </div>
               ) : (
                 <>
-                  {/* Header */}
                   <div className="flex items-start gap-3 mb-5 pr-8">
                     <div className="h-10 w-10 rounded-xl flex items-center justify-center shrink-0"
                       style={{ background: `${NEARBY_AMBER}22`, border: `1px solid ${NEARBY_AMBER}44` }}>
@@ -1054,7 +1062,6 @@ function SubmitPage() {
                     </div>
                   )}
 
-                  {/* Nearby report cards */}
                   <div className="space-y-3 mb-5 max-h-64 overflow-y-auto pr-1 -mr-1">
                     {nearbyReports.map((r) => {
                       const statusInfo = STATUS_LABEL[r.status] ?? { label: r.status, color: "text-muted-foreground" };
@@ -1068,9 +1075,7 @@ function SubmitPage() {
                                 <span className={`text-[10px] font-medium shrink-0 ${statusInfo.color}`}>● {statusInfo.label}</span>
                               </div>
                               <div className="flex items-center gap-3 text-[11px] text-muted-foreground mb-2">
-                                <span className="flex items-center gap-1">
-                                  <MapPin size={9} style={{ color: NEARBY_AMBER }} />{r.distanceMeters}m dari titik Anda
-                                </span>
+                                <span className="flex items-center gap-1"><MapPin size={9} style={{ color: NEARBY_AMBER }} />{r.distanceMeters}m dari titik Anda</span>
                                 <span className="flex items-center gap-1"><Users size={9} />{supporters} pelapor</span>
                               </div>
                               <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{r.description}</p>
@@ -1081,11 +1086,7 @@ function SubmitPage() {
                             onClick={() => handleJoinReport(r.id)}
                             disabled={joiningId !== null}
                             className="mt-3 w-full py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-smooth disabled:opacity-50 disabled:cursor-not-allowed"
-                            style={{
-                              background: `${NEARBY_AMBER}1a`,
-                              border: `1px solid ${NEARBY_AMBER}44`,
-                              color: NEARBY_AMBER,
-                            }}
+                            style={{ background: `${NEARBY_AMBER}1a`, border: `1px solid ${NEARBY_AMBER}44`, color: NEARBY_AMBER }}
                           >
                             {joiningId === r.id
                               ? <><Loader2 size={12} className="animate-spin" /> Bergabung…</>
@@ -1097,7 +1098,6 @@ function SubmitPage() {
                     })}
                   </div>
 
-                  {/* Footer actions */}
                   <div className="flex gap-3 pt-4 border-t border-border">
                     <button onClick={() => setShowDupModal(false)} disabled={submittingNew || joiningId !== null}
                       className="flex-1 px-4 py-2.5 rounded-xl glass text-sm font-medium hover:bg-white/10 transition-smooth disabled:opacity-50">
