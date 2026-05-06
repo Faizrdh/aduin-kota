@@ -9,7 +9,8 @@ import {
   ChevronDown, X, CheckCircle2, Clock, CircleDot,
   Ban, RefreshCw, Filter, MoreHorizontal, Bot,
   Zap, Flame, Send, History, ChevronRight,
-  ArrowRight, User, StickyNote,
+  ArrowRight, User, StickyNote, Download, FileText,
+  Sheet, ChevronUp,
 } from "lucide-react";
 import { authFetch } from "@/data/login";
 import { CategoryBadge, StatusBadge } from "@/components/civic/StatusBadge";
@@ -72,7 +73,6 @@ const CATEGORY_DISPLAY: Record<DbCategory, { label: string; color: string }> = {
   LAND:    { label: "Tanah / Sosial",      color: "green" },
 };
 
-// Default note hints — mirrored from server STATUS_NOTE_HINTS
 const STATUS_NOTE_HINTS: Record<DbStatus, string> = {
   PENDING:     "Laporan telah diterima dan menunggu tinjauan.",
   IN_REVIEW:   "Laporan sedang ditinjau dan disaring oleh tim admin.",
@@ -130,6 +130,468 @@ function toShortId(id: string) { return `RPT-${id.slice(-4).toUpperCase()}`; }
 function toTitle(s: string)    { return s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()); }
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function fmtDateShort(iso: string) {
+  return new Date(iso).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// ─── Export Helpers ───────────────────────────────────────────────────────────
+
+/** Fetch ALL reports matching current filters (no pagination) for export */
+async function fetchAllReportsForExport(params: {
+  filter: FilterStatus;
+  search: string;
+  dinasFilter: string;
+}): Promise<ApiReport[]> {
+  // Build base params
+  const baseParams: Record<string, string> = { page: "1", limit: "500" };
+  if (params.filter !== "all") baseParams.status    = params.filter;
+  if (params.search)           baseParams.search    = params.search;
+  if (params.dinasFilter)      baseParams.ai_label  = params.dinasFilter;
+
+  const makeUrl = (page: number) => {
+    const p = new URLSearchParams({ ...baseParams, page: String(page) });
+    return `/api/reports/all?${p}`;
+  };
+
+  const res = await authFetch(makeUrl(1));
+  if (!res.ok) throw new Error("Gagal mengambil data untuk export.");
+  const json: { data: ApiReport[]; meta: ApiMeta } = await res.json();
+
+  const { totalPages } = json.meta;
+  if (totalPages <= 1) return json.data;
+
+  // Fetch remaining pages — each with its own URLSearchParams to avoid mutation race
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, i) => i + 2).map(async (pg) => {
+      const r = await authFetch(makeUrl(pg));
+      if (!r.ok) throw new Error(`Gagal mengambil halaman ${pg}.`);
+      const j: { data: ApiReport[] } = await r.json();
+      return j.data;
+    })
+  );
+  return [json.data, ...rest].flat();
+}
+
+/** Map reports to a flat array of rows for export */
+function reportsToRows(reports: ApiReport[]) {
+  return reports.map((r, i) => ({
+    no:         i + 1,
+    id:         toShortId(r.id),
+    judul:      r.title,
+    pelapor:    r.user?.name ?? "—",
+    kategori:   CATEGORY_DISPLAY[r.category]?.label ?? r.category,
+    status:     STATUS_DISPLAY[r.status]?.label     ?? r.status,
+    prioritas:  PRIORITY_CONFIG[r.priority]?.label  ?? r.priority,
+    dinas_ai:   r.ai_label ?? "—",
+    provinsi:   toTitle(r.province),
+    kota:       toTitle(r.city),
+    kecamatan:  toTitle(r.district),
+    kelurahan:  toTitle(r.village),
+    tanggal:    fmtDateShort(r.createdAt),
+    diperbarui: fmtDateShort(r.updatedAt),
+    bergabung:  r._count.joins,
+  }));
+}
+
+const EXPORT_COLUMNS = [
+  { key: "no",         label: "No",          width: 8  },
+  { key: "id",         label: "ID Laporan",  width: 16 },
+  { key: "judul",      label: "Judul",       width: 40 },
+  { key: "pelapor",    label: "Pelapor",     width: 22 },
+  { key: "kategori",   label: "Kategori",    width: 26 },
+  { key: "status",     label: "Status",      width: 20 },
+  { key: "prioritas",  label: "Prioritas",   width: 14 },
+  { key: "dinas_ai",   label: "Dinas AI",    width: 22 },
+  { key: "kota",       label: "Kota",        width: 24 },
+  { key: "kecamatan",  label: "Kecamatan",   width: 24 },
+  { key: "tanggal",    label: "Tgl Masuk",   width: 16 },
+  { key: "bergabung",  label: "Bergabung",   width: 12 },
+];
+
+// ─── Export PDF ───────────────────────────────────────────────────────────────
+async function exportToPDF(reports: ApiReport[], title: string) {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+
+  const doc  = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const rows = reportsToRows(reports);
+  const now  = new Date().toLocaleString("id-ID");
+
+  // ── Header block ──
+  doc.setFillColor(15, 23, 42);
+  doc.rect(0, 0, 297, 30, "F");
+
+  doc.setFillColor(99, 102, 241);
+  doc.rect(0, 0, 5, 30, "F");
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text("AduinKota — Admin Panel", 12, 11);
+
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(148, 163, 184);
+  doc.text(`Laporan Masuk${title ? ` · Filter: ${title}` : ""}`, 12, 19);
+  doc.text(`Diekspor: ${now}`, 12, 26);
+
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Total: ${reports.length} laporan`, 270, 19, { align: "right" });
+
+  // ── Status color map ──
+  const statusColors: Record<string, [number, number, number]> = {
+    "Baru":            [251, 191, 36],
+    "Sedang Ditinjau": [56,  189, 248],
+    "Dalam Proses":    [96,  165, 250],
+    "Diteruskan":      [167, 139, 250],
+    "Selesai":         [52,  211, 153],
+    "Ditolak":         [248, 113, 113],
+  };
+
+  const priorityColors: Record<string, [number, number, number]> = {
+    "Normal":    [100, 116, 139],
+    "Prioritas": [251, 191,  36],
+    "Darurat":   [239,  68,  68],
+  };
+
+  autoTable(doc, {
+    startY: 35,
+    head: [EXPORT_COLUMNS.map(c => c.label)],
+    body: rows.map(r => EXPORT_COLUMNS.map(c => String((r as any)[c.key] ?? ""))),
+    styles: {
+      fontSize:   7.5,
+      cellPadding: 3,
+      overflow:    "linebreak",
+      valign:      "middle",
+      lineColor:   [30, 41, 59],
+      lineWidth:   0.2,
+    },
+    headStyles: {
+      fillColor:   [15, 23, 42],
+      textColor:   [148, 163, 184],
+      fontStyle:   "bold",
+      fontSize:    7,
+      cellPadding: { top: 4, bottom: 4, left: 3, right: 3 },
+    },
+    columnStyles: Object.fromEntries(
+      EXPORT_COLUMNS.map((c, i) => [i, { cellWidth: c.width }])
+    ),
+    alternateRowStyles: {
+      fillColor: [22, 31, 48],
+    },
+    bodyStyles: {
+      fillColor:  [17, 24, 39],
+      textColor:  [203, 213, 225],
+    },
+    didParseCell(data) {
+      if (data.section === "body") {
+        const colKey = EXPORT_COLUMNS[data.column.index]?.key;
+        if (colKey === "status") {
+          const color = statusColors[data.cell.text[0]];
+          if (color) data.cell.styles.textColor = color;
+        }
+        if (colKey === "prioritas") {
+          const color = priorityColors[data.cell.text[0]];
+          if (color) data.cell.styles.textColor = color;
+        }
+        if (colKey === "judul") data.cell.styles.fontStyle = "bold";
+        if (["pelapor", "kota", "kecamatan", "tanggal"].includes(colKey)) {
+          data.cell.styles.textColor = [100, 116, 139];
+        }
+      }
+    },
+    didDrawPage(data) {
+      const pageCount = (doc as any).internal.getNumberOfPages();
+      doc.setFontSize(7);
+      doc.setTextColor(71, 85, 105);
+      doc.text(
+        `AduinKota Admin Panel  ·  Halaman ${data.pageNumber} / ${pageCount}`,
+        148.5, 205, { align: "center" }
+      );
+    },
+  });
+
+  const stamp = new Date().toISOString().slice(0, 10);
+  doc.save(`laporan-masuk_${stamp}.pdf`);
+}
+
+// ─── Export Excel ─────────────────────────────────────────────────────────────
+async function exportToExcel(reports: ApiReport[], filterLabel: string) {
+  const XLSX = await import("xlsx");
+
+  const rows  = reportsToRows(reports);
+  const now   = new Date().toLocaleString("id-ID");
+  const stamp = new Date().toISOString().slice(0, 10);
+
+  const wsData: (string | number)[][] = [
+    ["AduinKota — Laporan Masuk", "", "", "", "", "", "", "", "", "", "", ""],
+    [`Filter: ${filterLabel || "Semua"} | Total: ${reports.length} | Ekspor: ${now}`],
+    [],
+    EXPORT_COLUMNS.map(c => c.label),
+    ...rows.map(r => EXPORT_COLUMNS.map(c => (r as any)[c.key] ?? "")),
+  ];
+
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+  ws["!cols"] = EXPORT_COLUMNS.map(c => ({ wch: c.width }));
+
+  ws["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: EXPORT_COLUMNS.length - 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: EXPORT_COLUMNS.length - 1 } },
+  ];
+
+  const titleCell = ws["A1"];
+  if (titleCell) {
+    titleCell.s = {
+      font:      { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
+      fill:      { fgColor: { rgb: "0F172A" } },
+      alignment: { horizontal: "left", vertical: "center" },
+    };
+  }
+
+  const metaCell = ws["A2"];
+  if (metaCell) {
+    metaCell.s = {
+      font:      { sz: 9, color: { rgb: "94A3B8" } },
+      fill:      { fgColor: { rgb: "0F172A" } },
+      alignment: { horizontal: "left" },
+    };
+  }
+
+  const headerRowIdx = 3;
+  EXPORT_COLUMNS.forEach((_, ci) => {
+    const cellAddr = XLSX.utils.encode_cell({ r: headerRowIdx, c: ci });
+    if (!ws[cellAddr]) return;
+    ws[cellAddr].s = {
+      font:      { bold: true, sz: 9, color: { rgb: "E2E8F0" } },
+      fill:      { fgColor: { rgb: "1E293B" } },
+      border: {
+        bottom: { style: "medium", color: { rgb: "6366F1" } },
+      },
+      alignment: { horizontal: "center", vertical: "center" },
+    };
+  });
+
+  const STATUS_HEX: Record<string, string> = {
+    "Baru":            "FBBF24",
+    "Sedang Ditinjau": "38BDF8",
+    "Dalam Proses":    "60A5FA",
+    "Diteruskan":      "A78BFA",
+    "Selesai":         "34D399",
+    "Ditolak":         "F87171",
+  };
+  const PRIORITY_HEX: Record<string, string> = {
+    "Normal":    "64748B",
+    "Prioritas": "FBBF24",
+    "Darurat":   "EF4444",
+  };
+
+  rows.forEach((row, ri) => {
+    const sheetRowIdx = 4 + ri;
+    const isEven      = ri % 2 === 0;
+    const bgHex       = isEven ? "111827" : "162030";
+
+    EXPORT_COLUMNS.forEach(({ key }, ci) => {
+      const cellAddr = XLSX.utils.encode_cell({ r: sheetRowIdx, c: ci });
+      if (!ws[cellAddr]) return;
+
+      let fontColor = "CBD5E1";
+      if (key === "status")    fontColor = STATUS_HEX[(row as any).status]       ?? fontColor;
+      if (key === "prioritas") fontColor = PRIORITY_HEX[(row as any).prioritas]  ?? fontColor;
+      if (key === "judul")     fontColor = "F1F5F9";
+      if (["pelapor", "kota", "kecamatan", "tanggal"].includes(key)) fontColor = "64748B";
+
+      ws[cellAddr].s = {
+        font:      { sz: 8.5, color: { rgb: fontColor }, bold: key === "judul" },
+        fill:      { fgColor: { rgb: bgHex } },
+        border: {
+          bottom: { style: "thin", color: { rgb: "1E293B" } },
+          right:  { style: "thin", color: { rgb: "1E293B" } },
+        },
+        alignment: {
+          vertical:   "center",
+          wrapText:   key === "judul",
+          horizontal: ["no", "bergabung"].includes(key) ? "center" : "left",
+        },
+      };
+    });
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Laporan Masuk");
+
+  const statusCounts = rows.reduce<Record<string, number>>((acc, r) => {
+    acc[r.status] = (acc[r.status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const summaryCols = ["Status", "Jumlah", "Persentase"];
+  const summaryData: (string | number)[][] = [
+    ["Ringkasan Laporan"],
+    [`Diekspor: ${now}`],
+    [],
+    summaryCols,
+    ...Object.entries(statusCounts).map(([s, c]) => [
+      s, c, `${((c / reports.length) * 100).toFixed(1)}%`,
+    ]),
+    [],
+    ["Total", reports.length, "100%"],
+  ];
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+  wsSummary["!cols"] = [{ wch: 22 }, { wch: 12 }, { wch: 14 }];
+  XLSX.utils.book_append_sheet(wb, wsSummary, "Ringkasan");
+
+  XLSX.writeFile(wb, `laporan-masuk_${stamp}.xlsx`);
+}
+
+// ─── Export Button Component ──────────────────────────────────────────────────
+function ExportMenu({
+  filter,
+  search,
+  dinasFilter,
+}: {
+  filter:      FilterStatus;
+  search:      string;
+  dinasFilter: string;
+}) {
+  const [open,    setOpen]    = useState(false);
+  const [loading, setLoading] = useState<"pdf" | "excel" | null>(null);
+  const btnRef = useRef<HTMLDivElement>(null);
+
+  // ── FIX: also check if click is inside the export portal before closing ──
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      const target = e.target as Node;
+      // Don't close if clicking inside the portal dropdown itself
+      const portal = document.getElementById("export-portal");
+      if (portal?.contains(target)) return;
+      // Don't close if clicking the trigger button
+      if (btnRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  function buildFilterLabel() {
+    const parts: string[] = [];
+    if (filter !== "all") parts.push(STATUS_DISPLAY[filter as DbStatus]?.label ?? filter);
+    if (search)           parts.push(`"${search}"`);
+    if (dinasFilter)      parts.push(dinasFilter);
+    return parts.join(" · ") || "Semua";
+  }
+
+  async function handleExport(type: "pdf" | "excel") {
+    setLoading(type);
+    setOpen(false);
+    try {
+      const allReports = await fetchAllReportsForExport({ filter, search, dinasFilter });
+      const label      = buildFilterLabel();
+      if (type === "pdf")   await exportToPDF(allReports, label);
+      if (type === "excel") await exportToExcel(allReports, label);
+    } catch (err) {
+      console.error("[Export Error]", err);
+      alert(`Gagal export: ${(err as Error).message}`);
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  const isLoading = loading !== null;
+
+  return (
+    <div className="relative" ref={btnRef}>
+      {/* Trigger button */}
+      <button
+        onClick={() => setOpen(p => !p)}
+        disabled={isLoading}
+        className="flex items-center gap-2 px-4 py-2 rounded-xl glass text-xs font-medium
+          text-muted-foreground hover:text-foreground transition-smooth border border-border/50
+          disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {isLoading
+          ? <><Loader2 size={13} className="animate-spin" /><span>Mengekspor…</span></>
+          : <><Download size={13} /><span>Export</span><ChevronDown size={11} className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`} /></>
+        }
+      </button>
+
+      {/* Dropdown portal — id="export-portal" so the outside-click guard can find it */}
+      {open && !isLoading && ReactDOM.createPortal(
+        (() => {
+          const rect = btnRef.current!.getBoundingClientRect();
+          return (
+            <div
+              id="export-portal"
+              style={{
+                position: "fixed",
+                top:      rect.bottom + 6,
+                right:    window.innerWidth - rect.right,
+                zIndex:   9999,
+                minWidth: 220,
+              }}
+              className="glass-strong border border-border rounded-xl shadow-2xl overflow-hidden"
+            >
+              {/* Header */}
+              <div className="px-3.5 py-2.5 border-b border-border/60">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Ekspor Laporan
+                </p>
+                <p className="text-[10px] text-muted-foreground/60 mt-0.5 truncate max-w-[190px]">
+                  Filter aktif: <span className="text-accent/80">{buildFilterLabel()}</span>
+                </p>
+              </div>
+
+              {/* PDF */}
+              <button
+                onClick={() => handleExport("pdf")}
+                className="w-full flex items-start gap-3 px-3.5 py-3 text-left
+                  hover:bg-white/10 transition-smooth group"
+              >
+                <div className="h-8 w-8 rounded-lg bg-red-500/15 border border-red-500/25
+                  flex items-center justify-center shrink-0 group-hover:bg-red-500/20 transition-smooth">
+                  <FileText size={14} className="text-red-400" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-foreground">Export PDF</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                    Tabel berformat rapi, siap cetak
+                  </div>
+                </div>
+              </button>
+
+              {/* Excel */}
+              <button
+                onClick={() => handleExport("excel")}
+                className="w-full flex items-start gap-3 px-3.5 py-3 text-left
+                  hover:bg-white/10 transition-smooth group border-t border-border/40"
+              >
+                <div className="h-8 w-8 rounded-lg bg-emerald-500/15 border border-emerald-500/25
+                  flex items-center justify-center shrink-0 group-hover:bg-emerald-500/20 transition-smooth">
+                  <Sheet size={14} className="text-emerald-400" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-foreground">Export Excel</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                    .xlsx dengan sheet ringkasan statistik
+                  </div>
+                </div>
+              </button>
+
+              {/* Footer note */}
+              <div className="px-3.5 py-2 border-t border-border/40 text-[9.5px] text-muted-foreground/50 leading-relaxed">
+                Semua data sesuai filter aktif akan diunduh
+              </div>
+            </div>
+          );
+        })(),
+        document.body
+      )}
+    </div>
+  );
 }
 
 // ─── Priority Badge ───────────────────────────────────────────────────────────
@@ -208,7 +670,6 @@ function HistoryModal({ reportId, reportTitle, onClose }: {
       .finally(() => setLoading(false));
   }, [reportId]);
 
-  // Close on outside click
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     document.addEventListener("keydown", onKey);
@@ -231,7 +692,6 @@ function HistoryModal({ reportId, reportTitle, onClose }: {
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="glass-strong border border-border rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
-        {/* Header */}
         <div className="flex items-start justify-between gap-3 p-5 border-b border-border/60">
           <div>
             <div className="flex items-center gap-2 text-xs text-accent mb-1">
@@ -243,8 +703,6 @@ function HistoryModal({ reportId, reportTitle, onClose }: {
             <X size={14} className="text-muted-foreground" />
           </button>
         </div>
-
-        {/* Timeline */}
         <div className="overflow-y-auto flex-1 p-5">
           {loading && (
             <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground">
@@ -256,13 +714,10 @@ function HistoryModal({ reportId, reportTitle, onClose }: {
           )}
           {!loading && history.length > 0 && (
             <ol className="relative border-l border-border/50 ml-2 space-y-0">
-              {history.map((h, i) => (
+              {history.map((h) => (
                 <li key={h.id} className="ml-5 pb-6 last:pb-0">
-                  {/* Circle on timeline */}
                   <span className="absolute -left-[5px] flex h-2.5 w-2.5 items-center justify-center rounded-full bg-accent border border-background ring-2 ring-accent/30" />
-
                   <div className="glass rounded-xl border border-border/50 p-3.5 space-y-2">
-                    {/* Status transition */}
                     <div className="flex items-center gap-2 flex-wrap">
                       {h.fromStatus && (
                         <>
@@ -276,22 +731,14 @@ function HistoryModal({ reportId, reportTitle, onClose }: {
                         {STATUS_DISPLAY[h.toStatus]?.label ?? h.toStatus}
                       </span>
                     </div>
-
-                    {/* Note */}
                     {h.note && (
                       <div className="flex items-start gap-2 text-xs text-muted-foreground bg-white/5 rounded-lg px-2.5 py-2">
                         <StickyNote size={11} className="shrink-0 mt-0.5 text-accent/70" />
                         <span className="leading-relaxed">{h.note}</span>
                       </div>
                     )}
-
-                    {/* Meta */}
                     <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
-                      {h.admin && (
-                        <span className="flex items-center gap-1">
-                          <User size={9} />{h.admin.name}
-                        </span>
-                      )}
+                      {h.admin && <span className="flex items-center gap-1"><User size={9} />{h.admin.name}</span>}
                       <span>{fmtDate(h.createdAt)}</span>
                     </div>
                   </div>
@@ -354,8 +801,6 @@ function StatusDropdown({ reportId, currentStatus, onUpdated }: {
   const [note,    setNote]    = useState("");
   const [pos,     setPos]     = useState({ top: 0, left: 0, width: 0 });
   const btnRef = useRef<HTMLButtonElement>(null);
-
-  // Auto-fill note hint on status hover / initial open
   const [hintNote, setHintNote] = useState("");
 
   useEffect(() => {
@@ -413,7 +858,6 @@ function StatusDropdown({ reportId, currentStatus, onUpdated }: {
       style={{ position: "fixed", top: pos.top, left: pos.left, minWidth: Math.max(pos.width, 260), zIndex: 9999 }}
       className="glass-strong border border-border rounded-xl shadow-lg overflow-hidden"
     >
-      {/* Note input + hint */}
       <div className="p-2.5 border-b border-border/50 space-y-1.5">
         <textarea
           rows={2}
@@ -432,7 +876,6 @@ function StatusDropdown({ reportId, currentStatus, onUpdated }: {
           </button>
         )}
       </div>
-
       {STATUS_OPTIONS.map(opt => (
         <button
           key={opt.value}
@@ -453,8 +896,6 @@ function StatusDropdown({ reportId, currentStatus, onUpdated }: {
           )}
         </button>
       ))}
-
-      {/* Hint preview for hovered status */}
       {hintNote && (
         <div className="px-3 py-2 border-t border-border/50 text-[10px] text-muted-foreground/60 italic leading-relaxed">
           {hintNote}
@@ -516,8 +957,6 @@ function IncomingReports() {
   const [q,            setQ]            = useState("");
   const [debouncedQ,   setDebouncedQ]   = useState("");
   const [page,         setPage]         = useState(1);
-
-  // History modal
   const [historyModal, setHistoryModal] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
@@ -579,12 +1018,20 @@ function IncomingReports() {
           <h1 className="font-display text-3xl md:text-4xl font-bold text-gradient">Laporan Masuk</h1>
           <p className="text-muted-foreground mt-2 text-sm">Kelola & perbarui status semua laporan dari masyarakat.</p>
         </div>
-        <button
-          onClick={() => { fetchReports(); fetchStats(); }}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl glass text-xs font-medium text-muted-foreground hover:text-foreground transition-smooth border border-border/50"
-        >
-          <RefreshCw size={13} />Refresh
-        </button>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <ExportMenu
+            filter={filter}
+            search={debouncedQ}
+            dinasFilter={dinasFilter}
+          />
+          <button
+            onClick={() => { fetchReports(); fetchStats(); }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl glass text-xs font-medium text-muted-foreground hover:text-foreground transition-smooth border border-border/50"
+          >
+            <RefreshCw size={13} />Refresh
+          </button>
+        </div>
       </header>
 
       {/* Stat Cards */}
@@ -600,7 +1047,6 @@ function IncomingReports() {
 
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-3 mb-5">
-        {/* Search */}
         <div className="glass rounded-xl px-3.5 py-2 flex items-center gap-2 flex-1 max-w-sm">
           <Search size={14} className="text-muted-foreground shrink-0" />
           <input
@@ -611,7 +1057,6 @@ function IncomingReports() {
           {q && <button onClick={() => setQ("")} className="text-muted-foreground hover:text-foreground"><X size={13} /></button>}
         </div>
 
-        {/* Filter Status */}
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Filter size={12} /><span>Filter:</span></div>
         <div className="glass rounded-xl p-1 flex items-center gap-1 overflow-x-auto scrollbar-none">
           {FILTER_TABS.map(({ key, label }) => (
@@ -624,7 +1069,6 @@ function IncomingReports() {
           ))}
         </div>
 
-        {/* Filter Dinas AI */}
         <DinasFilter value={dinasFilter} onChange={setDinasFilter} />
         {dinasFilter && (
           <button onClick={() => setDinasFilter("")}
@@ -636,9 +1080,6 @@ function IncomingReports() {
 
       {/* Tabel */}
       <div className="glass rounded-2xl shadow-soft overflow-visible">
-
-        {/* Header kolom desktop */}
-        {/* KOLOM: Foto | Laporan | Kategori | Status | Prioritas | Dinas AI | Lokasi | Masuk | Ubah Status | Riwayat | ⋯ */}
         <div className="hidden md:grid grid-cols-[72px_2fr_1fr_1fr_100px_1.1fr_1.1fr_80px_150px_36px_36px] gap-2 px-5 py-3 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border rounded-t-2xl">
           <div>Foto</div>
           <div>Laporan</div>
@@ -694,7 +1135,6 @@ function IncomingReports() {
                     : "hover:bg-white/[0.03]"
                 }`}
               >
-                {/* Image */}
                 <div className="relative">
                   <img
                     src={r.imageUrl ?? PLACEHOLDER_IMG}
@@ -710,7 +1150,6 @@ function IncomingReports() {
                   )}
                 </div>
 
-                {/* Title & badges */}
                 <div className="min-w-0">
                   <div className="text-[10px] text-muted-foreground tracking-wider font-mono">
                     {toShortId(r.id)}<span className="ml-2 opacity-60">· {r.user?.name ?? "—"}</span>
@@ -718,13 +1157,9 @@ function IncomingReports() {
                   <div className="text-sm font-medium truncate mt-0.5 flex items-center gap-1.5">
                     <span className="truncate">{r.title}</span>
                   </div>
-                  {/* Priority badge inline if not NORMAL */}
                   {r.priority !== "NORMAL" && (
-                    <div className="mt-1">
-                      <PriorityBadge priority={r.priority} />
-                    </div>
+                    <div className="mt-1"><PriorityBadge priority={r.priority} /></div>
                   )}
-                  {/* Mobile: extra badges */}
                   <div className="md:hidden flex flex-wrap gap-1.5 mt-1.5">
                     <CategoryBadge category={cat.color} label={cat.label} />
                     <StatusBadge   status={status.variant as any} />
@@ -735,41 +1170,25 @@ function IncomingReports() {
                 <div className="hidden md:block"><CategoryBadge category={cat.color} label={cat.label} /></div>
                 <div className="hidden md:block"><StatusBadge   status={status.variant as any} /></div>
 
-                {/* Priority toggle */}
                 <div className="hidden md:flex items-center">
-                  <PriorityToggle
-                    reportId={r.id}
-                    current={r.priority ?? "NORMAL"}
-                    onUpdated={handlePriorityUpdated}
-                  />
+                  <PriorityToggle reportId={r.id} current={r.priority ?? "NORMAL"} onUpdated={handlePriorityUpdated} />
                 </div>
 
-                {/* Dinas AI */}
-                <div className="hidden md:block">
-                  <AdminAICell report={r} />
-                </div>
+                <div className="hidden md:block"><AdminAICell report={r} /></div>
 
-                {/* Lokasi */}
                 <div className="hidden md:block text-xs text-muted-foreground truncate leading-snug">
                   <div>{toTitle(r.village)}</div>
                   <div className="opacity-70">{toTitle(r.city)}</div>
                 </div>
 
-                {/* Masuk */}
                 <div className="hidden md:block text-xs text-muted-foreground whitespace-nowrap">
                   {timeAgo(r.createdAt)}
                 </div>
 
-                {/* Status Dropdown */}
                 <div className="hidden md:flex items-center">
-                  <StatusDropdown
-                    reportId={r.id}
-                    currentStatus={r.status}
-                    onUpdated={handleStatusUpdated}
-                  />
+                  <StatusDropdown reportId={r.id} currentStatus={r.status} onUpdated={handleStatusUpdated} />
                 </div>
 
-                {/* History button */}
                 <button
                   title="Lihat riwayat status"
                   onClick={() => setHistoryModal({ id: r.id, title: r.title })}

@@ -19,7 +19,7 @@ export const Route = createFileRoute("/my-reports")({
 });
 
 // ─── Tipe dari Prisma ─────────────────────────────────────────────────────────
-type DbStatus   = "PENDING" | "IN_REVIEW" | "IN_PROGRESS" | "RESOLVED" | "REJECTED";
+type DbStatus   = "PENDING" | "IN_REVIEW" | "IN_PROGRESS" | "DISPATCHED" | "RESOLVED" | "REJECTED";
 type DbCategory = "WASTE" | "INFRA" | "DISTURB" | "LAND";
 
 interface ApiReport {
@@ -46,18 +46,20 @@ interface ApiReport {
 
 // ─── Mapping ──────────────────────────────────────────────────────────────────
 const CATEGORY_DISPLAY: Record<DbCategory, { label: string; color: string }> = {
-  WASTE:   { label: "Pengelolaan Sampah", color: "red"   },
-  INFRA:   { label: "Infrastruktur",      color: "blue"  },
-  DISTURB: { label: "Gangguan Ketertiban",color: "amber" },
-  LAND:    { label: "Tanah / Sosial",     color: "green" },
+  WASTE:   { label: "Pengelolaan Sampah",  color: "red"   },
+  INFRA:   { label: "Infrastruktur",       color: "blue"  },
+  DISTURB: { label: "Gangguan Ketertiban", color: "amber" },
+  LAND:    { label: "Tanah / Sosial",      color: "green" },
 };
 
+// ✅ FIX: Tambahkan DISPATCHED agar tidak undefined
 const STATUS_DISPLAY: Record<DbStatus, { label: string; variant: string }> = {
-  PENDING:     { label: "Baru",         variant: "new"      },
-  IN_REVIEW:   { label: "Dalam Proses", variant: "progress" },
-  IN_PROGRESS: { label: "Dalam Proses", variant: "progress" },
-  RESOLVED:    { label: "Selesai",      variant: "resolved" },
-  REJECTED:    { label: "Ditolak",      variant: "rejected" },
+  PENDING:     { label: "Baru",         variant: "new"        },
+  IN_REVIEW:   { label: "Dalam Proses", variant: "progress"   },
+  IN_PROGRESS: { label: "Dalam Proses", variant: "progress"   },
+  DISPATCHED:  { label: "Diteruskan",   variant: "dispatched" },
+  RESOLVED:    { label: "Selesai",      variant: "resolved"   },
+  REJECTED:    { label: "Ditolak",      variant: "rejected"   },
 };
 
 type FilterTab = "all" | "new" | "progress" | "resolved";
@@ -71,7 +73,7 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 function matchesFilter(status: DbStatus, filter: FilterTab): boolean {
   if (filter === "all")      return true;
   if (filter === "new")      return status === "PENDING";
-  if (filter === "progress") return status === "IN_REVIEW" || status === "IN_PROGRESS";
+  if (filter === "progress") return status === "IN_REVIEW" || status === "IN_PROGRESS" || status === "DISPATCHED";
   if (filter === "resolved") return status === "RESOLVED";
   return true;
 }
@@ -95,22 +97,20 @@ const PLACEHOLDER_IMG = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000
 const API_BASE = "/api/reports";
 
 // ─── Sub-komponen: AI Badge per baris ─────────────────────────────────────────
-// Komponen terpisah agar setiap baris punya polling state sendiri.
 function RowAIBadge({
   reportId,
   initialLabel,
   initialScore,
   initialOverridden,
 }: {
-  reportId:         string;
-  initialLabel:     string | null | undefined;
-  initialScore:     number | null | undefined;
+  reportId:          string;
+  initialLabel:      string | null | undefined;
+  initialScore:      number | null | undefined;
   initialOverridden: boolean | undefined;
 }) {
   const { label, score, overridden, loading } = useAILabel(reportId, {
     initialLabel:  initialLabel  ?? null,
     initialScore:  initialScore  ?? null,
-    // Polling hanya aktif jika label belum ada (laporan baru disubmit)
     enabled:       !initialLabel,
     pollInterval:  4_000,
     maxAttempts:   8,
@@ -167,7 +167,7 @@ function MyReports() {
   const counts: Record<FilterTab, number> = {
     all:      reports.length,
     new:      reports.filter(r => r.status === "PENDING").length,
-    progress: reports.filter(r => r.status === "IN_REVIEW" || r.status === "IN_PROGRESS").length,
+    progress: reports.filter(r => r.status === "IN_REVIEW" || r.status === "IN_PROGRESS" || r.status === "DISPATCHED").length,
     resolved: reports.filter(r => r.status === "RESOLVED").length,
   };
 
@@ -213,8 +213,7 @@ function MyReports() {
       {/* Tabel */}
       <div className="glass rounded-2xl shadow-soft overflow-hidden">
 
-        {/* ── Header kolom desktop ── */}
-        {/* PERUBAHAN: tambah kolom "Dinas AI" setelah Status */}
+        {/* Header kolom desktop */}
         <div className="hidden md:grid grid-cols-[80px_2.5fr_1.2fr_1fr_1fr_1.4fr_100px_40px] gap-4 px-5 py-3 text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
           <div>Gambar</div>
           <div>Laporan</div>
@@ -268,12 +267,12 @@ function MyReports() {
 
           {/* Rows */}
           {!loading && !error && list.map(r => {
-            const cat    = CATEGORY_DISPLAY[r.category];
-            const status = STATUS_DISPLAY[r.status];
+            const cat = CATEGORY_DISPLAY[r.category] ?? { label: r.category, color: "gray" };
+            // ✅ FIX: fallback jika status tidak dikenali
+            const status = STATUS_DISPLAY[r.status] ?? { label: r.status, variant: "new" };
             return (
               <div
                 key={r.id}
-                // Mobile: 3 col | Desktop: 8 col (tambah kolom Dinas AI)
                 className="grid grid-cols-[64px_1fr_auto] md:grid-cols-[80px_2.5fr_1.2fr_1fr_1fr_1.4fr_100px_40px] gap-4 px-5 py-4 hover:bg-white/[0.03] transition-smooth items-center"
               >
                 {/* Gambar */}
@@ -293,7 +292,6 @@ function MyReports() {
                   <div className="md:hidden flex flex-wrap gap-1.5 mt-1.5">
                     <CategoryBadge category={cat.color} label={cat.label} />
                     <StatusBadge status={status.variant as any} />
-                    {/* AI Badge mobile */}
                     <RowAIBadge
                       reportId={r.id}
                       initialLabel={r.ai_label}
@@ -313,7 +311,7 @@ function MyReports() {
                   <StatusBadge status={status.variant as any} />
                 </div>
 
-                {/* ── DINAS AI — desktop ── */}
+                {/* DINAS AI — desktop */}
                 <div className="hidden md:block">
                   <RowAIBadge
                     reportId={r.id}
